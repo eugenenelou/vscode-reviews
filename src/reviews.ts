@@ -56,6 +56,36 @@ function provideCommentingRanges(
   return [new vscode.Range(0, 0, lastLine, 0)];
 }
 
+/**
+ * A thread's initial range is sometimes just the clicked gutter line even
+ * when the editor has a wider selection over that line (native drag-select
+ * already produces the right range and this is then a no-op union).
+ */
+function resolveCommentRange(thread: vscode.CommentThread): vscode.Range {
+  const base = thread.range ?? new vscode.Range(0, 0, 0, 0);
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.toString() !== thread.uri.toString()) {
+    return base;
+  }
+  const selection = editor.selection;
+  if (selection.isEmpty || selection.isSingleLine) {
+    return base;
+  }
+  const selectionEndLine =
+    selection.end.character === 0 && selection.end.line > selection.start.line
+      ? selection.end.line - 1
+      : selection.end.line;
+  const overlaps =
+    selection.start.line <= base.end.line &&
+    selectionEndLine >= base.start.line;
+  if (!overlaps) {
+    return base;
+  }
+  const startLine = Math.min(selection.start.line, base.start.line);
+  const endLine = Math.max(selectionEndLine, base.end.line);
+  return new vscode.Range(startLine, 0, endLine, 0);
+}
+
 function getWorkspaceRoot(uri: vscode.Uri): string {
   const folder =
     vscode.workspace.getWorkspaceFolder(uri) ??
@@ -156,7 +186,8 @@ export class ReviewsController {
       thread.uri.toString(),
       workspaceRoot,
     );
-    const range = thread.range ?? new vscode.Range(0, 0, 0, 0);
+    const range = resolveCommentRange(thread);
+    thread.range = range;
     const comment = this.store.addComment(
       {
         path: relPath,
