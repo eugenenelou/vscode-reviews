@@ -5,6 +5,11 @@
   "version": "0.0.1",
   "publisher": "eugene",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eugenenelou/vscode-reviews.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
