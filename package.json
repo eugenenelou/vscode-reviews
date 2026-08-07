@@ -1,0 +1,23 @@
+{
+  "name": "vscode-reviews",
+  "displayName": "Reviews",
+  "description": "Line-anchored review comments across any editor, exported as an AI-agent prompt.",
+  "version": "0.0.1",
+  "publisher": "eugene",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./dist/extension.js",
+  "contributes": {},
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
