@@ -246,7 +246,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "test": "vitest run",
-    "package": "npm run compile && vsce package"
+    "package": "pnpm run compile && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
