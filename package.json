@@ -79,6 +79,11 @@
         "icon": "$(copy)"
       },
       {
+        "command": "vscode-reviews.tree.copyLink",
+        "title": "Copy Link to Review",
+        "icon": "$(link)"
+      },
+      {
         "command": "vscode-reviews.tree.deleteReview",
         "title": "Delete Review",
         "icon": "$(trash)"
@@ -122,6 +127,10 @@
         },
         {
           "command": "vscode-reviews.tree.copyPrompt",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.tree.copyLink",
           "when": "false"
         },
         {
@@ -187,14 +196,19 @@
           "group": "inline@1"
         },
         {
-          "command": "vscode-reviews.newReview",
+          "command": "vscode-reviews.tree.copyLink",
           "when": "view == vscode-reviews.tree && viewItem == activeReview",
           "group": "inline@2"
         },
         {
-          "command": "vscode-reviews.tree.deleteReview",
+          "command": "vscode-reviews.newReview",
           "when": "view == vscode-reviews.tree && viewItem == activeReview",
           "group": "inline@3"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteReview",
+          "when": "view == vscode-reviews.tree && viewItem == activeReview",
+          "group": "inline@4"
         },
         {
           "command": "vscode-reviews.tree.copyPrompt",
@@ -202,9 +216,14 @@
           "group": "inline@1"
         },
         {
-          "command": "vscode-reviews.tree.deleteReview",
+          "command": "vscode-reviews.tree.copyLink",
           "when": "view == vscode-reviews.tree && viewItem == pastReview",
           "group": "inline@2"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteReview",
+          "when": "view == vscode-reviews.tree && viewItem == pastReview",
+          "group": "inline@3"
         },
         {
           "command": "vscode-reviews.tree.editComment",

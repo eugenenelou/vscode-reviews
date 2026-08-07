@@ -86,6 +86,7 @@ describe("ReviewStore", () => {
     store.startNewReview(40);
     expect(store.getActiveReview()).toBeNull();
     expect(store.listPastReviews()[0].id).toBe(firstReviewId);
+    expect(store.listPastReviews()[0].archivedAt).toBe(40);
 
     store.addComment(
       { path: "c.ts", startLine: 3, endLine: 3, text: "third" },
@@ -128,16 +129,45 @@ describe("ReviewStore", () => {
     expect(store.getReview(pastId)!.comments).toHaveLength(0);
   });
 
-  it("calls onChange with plain-JSON state after mutations", () => {
-    const snapshots: unknown[] = [];
+  it("calls onChange with a plain-JSON save change carrying only the affected review", () => {
+    const changes: unknown[] = [];
     const store = new ReviewStore({
-      onChange: (state) => snapshots.push(state),
+      onChange: (change) => changes.push(change),
     });
     store.addComment(
       { path: "a.ts", startLine: 1, endLine: 1, text: "first" },
       0,
     );
-    expect(snapshots).toHaveLength(1);
-    expect(JSON.parse(JSON.stringify(snapshots[0]))).toEqual(snapshots[0]);
+    expect(changes).toHaveLength(1);
+    expect(JSON.parse(JSON.stringify(changes[0]))).toEqual(changes[0]);
+    expect(changes[0]).toMatchObject({ kind: "save" });
+  });
+
+  it("onChange fires 'save' for comment mutations and archiving, 'delete' for deleteReview, and never for a no-op continue answer", () => {
+    const changes: Array<{ kind: string }> = [];
+    const store = new ReviewStore({
+      onChange: (change) => changes.push(change),
+    });
+    store.addComment(
+      { path: "a.ts", startLine: 1, endLine: 1, text: "first" },
+      0,
+    );
+    const reviewId = store.getActiveReview()!.id;
+    expect(changes).toEqual([
+      { kind: "save", review: store.getActiveReview() },
+    ]);
+
+    changes.length = 0;
+    store.rememberContinueAnswer(true, 10);
+    expect(changes).toHaveLength(0);
+
+    store.startNewReview(20);
+    expect(changes).toEqual([
+      { kind: "save", review: store.listPastReviews()[0] },
+    ]);
+
+    changes.length = 0;
+    store.deleteReview(reviewId);
+    expect(changes).toEqual([{ kind: "delete", reviewId }]);
   });
 });

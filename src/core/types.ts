@@ -13,5 +13,7 @@ export interface Review {
   id: string;
   createdAt: number;
   lastActivityAt: number;
+  /** null while active; set to the archiving timestamp when moved to past reviews */
+  archivedAt: number | null;
   comments: ReviewComment[];
 }

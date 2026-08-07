@@ -3,7 +3,13 @@ import { excerptComment, formatPrompt } from "./format";
 import type { Review } from "./types";
 
 function review(comments: Review["comments"]): Review {
-  return { id: "r1", createdAt: 0, lastActivityAt: 0, comments };
+  return {
+    id: "r1",
+    createdAt: 0,
+    lastActivityAt: 0,
+    archivedAt: null,
+    comments,
+  };
 }
 
 describe("formatPrompt", () => {

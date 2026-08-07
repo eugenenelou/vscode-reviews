@@ -1,22 +1,28 @@
 import * as vscode from "vscode";
 import { ReviewStore } from "./core/store";
 import type { ReviewComment } from "./core/types";
-import { getIdleTimeoutMs, loadState, saveState } from "./persistence";
+import {
+  applyChange,
+  getIdleTimeoutMs,
+  initFileStore,
+  loadReviews,
+} from "./persistence";
 import { ReviewsController, type ReviewCommentHandle } from "./reviews";
 import { ReviewsTreeProvider, type ReviewsTreeNode } from "./tree";
 
 export function activate(context: vscode.ExtensionContext) {
+  const fileStore = initFileStore();
   let treeProvider: ReviewsTreeProvider | undefined;
   const store = new ReviewStore({
     timeoutMs: getIdleTimeoutMs(),
-    initialState: loadState(context),
-    onChange: (state) => {
-      saveState(context, state);
+    initialState: loadReviews(fileStore.dir),
+    onChange: (change) => {
+      applyChange(fileStore.dir, change);
       treeProvider?.refresh();
     },
   });
 
-  const reviews = new ReviewsController(store);
+  const reviews = new ReviewsController(store, fileStore.dir);
   reviews.renderVisibleEditors();
 
   treeProvider = new ReviewsTreeProvider(store);
@@ -114,6 +120,14 @@ export function activate(context: vscode.ExtensionContext) {
       (node: ReviewsTreeNode) => {
         if (node.kind === "comment") {
           reviews.deleteCommentById(node.review, node.comment.id);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.tree.copyLink",
+      (node: ReviewsTreeNode) => {
+        if (node.kind === "activeReview" || node.kind === "pastReview") {
+          reviews.copyLink(node.review);
         }
       },
     ),

@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { ReviewStore } from "./core/store";
 import type { Review, ReviewComment } from "./core/types";
@@ -112,7 +113,10 @@ export class ReviewsController {
   private readonly threadsByCommentId = new Map<string, vscode.CommentThread>();
   readonly controller: vscode.CommentController;
 
-  constructor(private readonly store: ReviewStore) {
+  constructor(
+    private readonly store: ReviewStore,
+    private readonly storeDir: string,
+  ) {
     this.controller = vscode.comments.createCommentController(
       CONTROLLER_ID,
       "Reviews",
@@ -256,6 +260,16 @@ export class ReviewsController {
     }
     await vscode.env.clipboard.writeText(formatPrompt(target));
     vscode.window.showInformationMessage("Review prompt copied to clipboard.");
+  }
+
+  /** Copies the review's own JSON file path to the clipboard. */
+  async copyLink(review: Review): Promise<void> {
+    await vscode.env.clipboard.writeText(
+      join(this.storeDir, `${review.id}.json`),
+    );
+    vscode.window.showInformationMessage(
+      "Review file path copied to clipboard.",
+    );
   }
 
   /** Deletes a review by id (active or past), disposing its threads if it was active. */

@@ -6,12 +6,17 @@ export interface ReviewStorePersistedState {
   past: Review[];
 }
 
+/** One review's file needs (re)writing, or a review's file needs removing. */
+export type StoreChange =
+  | { kind: "save"; review: Review }
+  | { kind: "delete"; reviewId: string };
+
 export interface ReviewStoreOptions {
   /** idle timeout in ms before a continue/new prompt is needed; default 1h */
   timeoutMs?: number;
   initialState?: ReviewStorePersistedState;
-  /** called with the plain-JSON state after every mutation, for slice 2 to persist */
-  onChange?: (state: ReviewStorePersistedState) => void;
+  /** called after each mutation with exactly the review(s) that need writing/deleting on disk */
+  onChange?: (change: StoreChange) => void;
 }
 
 export type NewCommentInput = Omit<ReviewComment, "id">;
@@ -27,7 +32,7 @@ export class ReviewStore {
   private active: Review | null;
   private past: Review[];
   private readonly timeoutMs: number;
-  private readonly onChange?: (state: ReviewStorePersistedState) => void;
+  private readonly onChange?: (change: StoreChange) => void;
   private remembered: RememberedAnswer | null = null;
 
   constructor(options: ReviewStoreOptions = {}) {
@@ -66,14 +71,13 @@ export class ReviewStore {
   /**
    * Records the answer to the continue/new question so it is not asked again
    * for the same timeout duration. Answering "start new" archives the active
-   * review immediately.
+   * review immediately. The remembered answer itself is in-memory only, not
+   * part of the on-disk contract, so it never triggers a write.
    */
   rememberContinueAnswer(continueReview: boolean, now: number): void {
     this.remembered = { continueReview, expiresAt: now + this.timeoutMs };
     if (!continueReview) {
       this.startNewReview(now);
-    } else {
-      this.persist();
     }
   }
 
@@ -84,13 +88,14 @@ export class ReviewStore {
         id: randomUUID(),
         createdAt: now,
         lastActivityAt: now,
+        archivedAt: null,
         comments: [comment],
       };
     } else {
       this.active.comments.push(comment);
       this.active.lastActivityAt = now;
     }
-    this.persist();
+    this.notify({ kind: "save", review: this.active });
     return comment;
   }
 
@@ -110,7 +115,7 @@ export class ReviewStore {
     if (review === this.active) {
       review.lastActivityAt = now;
     }
-    this.persist();
+    this.notify({ kind: "save", review });
   }
 
   /** Deletes a comment from the active review by default, or from `reviewId` (active or past) when given. */
@@ -123,17 +128,18 @@ export class ReviewStore {
     if (review === this.active) {
       review.lastActivityAt = now;
     }
-    this.persist();
+    this.notify({ kind: "save", review });
   }
 
   /** Archives the active review (if any) and starts fresh. */
   startNewReview(now: number): void {
     if (this.active) {
+      this.active.archivedAt = now;
       this.past.unshift(this.active);
+      this.notify({ kind: "save", review: this.active });
     }
     this.active = null;
     this.remembered = null;
-    this.persist();
   }
 
   deleteReview(reviewId: string): void {
@@ -142,7 +148,7 @@ export class ReviewStore {
     } else {
       this.past = this.past.filter((r) => r.id !== reviewId);
     }
-    this.persist();
+    this.notify({ kind: "delete", reviewId });
   }
 
   private findReview(reviewId: string): Review | undefined {
@@ -152,7 +158,7 @@ export class ReviewStore {
     return this.past.find((r) => r.id === reviewId);
   }
 
-  private persist(): void {
-    this.onChange?.({ active: this.active, past: this.past });
+  private notify(change: StoreChange): void {
+    this.onChange?.(change);
   }
 }
