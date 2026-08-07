@@ -45,6 +45,11 @@ export class ReviewStore {
     return this.past;
   }
 
+  /** Looks up the active review or a past review by id. */
+  getReview(reviewId: string): Review | undefined {
+    return this.findReview(reviewId);
+  }
+
   needsContinuePrompt(now: number): boolean {
     if (!this.active) {
       return false;
@@ -89,28 +94,35 @@ export class ReviewStore {
     return comment;
   }
 
+  /** Edits a comment in the active review by default, or in `reviewId` (active or past) when given. */
   editComment(
     commentId: string,
     updates: Partial<Omit<ReviewComment, "id">>,
     now: number,
+    reviewId?: string,
   ): void {
-    const comment = this.active?.comments.find((c) => c.id === commentId);
-    if (!comment || !this.active) {
+    const review = reviewId ? this.findReview(reviewId) : this.active;
+    const comment = review?.comments.find((c) => c.id === commentId);
+    if (!comment || !review) {
       return;
     }
     Object.assign(comment, updates);
-    this.active.lastActivityAt = now;
+    if (review === this.active) {
+      review.lastActivityAt = now;
+    }
     this.persist();
   }
 
-  deleteComment(commentId: string, now: number): void {
-    if (!this.active) {
+  /** Deletes a comment from the active review by default, or from `reviewId` (active or past) when given. */
+  deleteComment(commentId: string, now: number, reviewId?: string): void {
+    const review = reviewId ? this.findReview(reviewId) : this.active;
+    if (!review) {
       return;
     }
-    this.active.comments = this.active.comments.filter(
-      (c) => c.id !== commentId,
-    );
-    this.active.lastActivityAt = now;
+    review.comments = review.comments.filter((c) => c.id !== commentId);
+    if (review === this.active) {
+      review.lastActivityAt = now;
+    }
     this.persist();
   }
 
@@ -131,6 +143,13 @@ export class ReviewStore {
       this.past = this.past.filter((r) => r.id !== reviewId);
     }
     this.persist();
+  }
+
+  private findReview(reviewId: string): Review | undefined {
+    if (this.active?.id === reviewId) {
+      return this.active;
+    }
+    return this.past.find((r) => r.id === reviewId);
   }
 
   private persist(): void {

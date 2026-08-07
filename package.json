@@ -13,6 +13,23 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vscode-reviews",
+          "title": "Reviews",
+          "icon": "media/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "vscode-reviews": [
+        {
+          "id": "vscode-reviews.tree",
+          "name": "Reviews"
+        }
+      ]
+    },
     "configuration": {
       "title": "Reviews",
       "properties": {
@@ -51,6 +68,30 @@
       {
         "command": "vscode-reviews.cancelEditComment",
         "title": "Cancel"
+      },
+      {
+        "command": "vscode-reviews.openComment",
+        "title": "Open comment location"
+      },
+      {
+        "command": "vscode-reviews.tree.copyPrompt",
+        "title": "Copy Prompt",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vscode-reviews.tree.deleteReview",
+        "title": "Delete Review",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vscode-reviews.tree.editComment",
+        "title": "Edit Comment",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vscode-reviews.tree.deleteComment",
+        "title": "Delete Comment",
+        "icon": "$(close)"
       }
     ],
     "menus": {
@@ -73,6 +114,26 @@
         },
         {
           "command": "vscode-reviews.cancelEditComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.openComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.tree.copyPrompt",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteReview",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.tree.editComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteComment",
           "when": "false"
         }
       ],
@@ -105,6 +166,55 @@
           "command": "vscode-reviews.cancelEditComment",
           "group": "inline@2",
           "when": "commentController == vscode-reviews"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "vscode-reviews.newReview",
+          "when": "view == vscode-reviews.tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscode-reviews.copyPrompt",
+          "when": "view == vscode-reviews.tree",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vscode-reviews.tree.copyPrompt",
+          "when": "view == vscode-reviews.tree && viewItem == activeReview",
+          "group": "inline@1"
+        },
+        {
+          "command": "vscode-reviews.newReview",
+          "when": "view == vscode-reviews.tree && viewItem == activeReview",
+          "group": "inline@2"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteReview",
+          "when": "view == vscode-reviews.tree && viewItem == activeReview",
+          "group": "inline@3"
+        },
+        {
+          "command": "vscode-reviews.tree.copyPrompt",
+          "when": "view == vscode-reviews.tree && viewItem == pastReview",
+          "group": "inline@1"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteReview",
+          "when": "view == vscode-reviews.tree && viewItem == pastReview",
+          "group": "inline@2"
+        },
+        {
+          "command": "vscode-reviews.tree.editComment",
+          "when": "view == vscode-reviews.tree && viewItem == comment",
+          "group": "inline@1"
+        },
+        {
+          "command": "vscode-reviews.tree.deleteComment",
+          "when": "view == vscode-reviews.tree && viewItem == comment",
+          "group": "inline@2"
         }
       ]
     }

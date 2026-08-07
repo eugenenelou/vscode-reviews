@@ -100,6 +100,34 @@ describe("ReviewStore", () => {
     expect(store.getActiveReview()).toBeNull();
   });
 
+  it("getReview finds the active review or a past review by id, editComment/deleteComment can target a past review", () => {
+    const store = new ReviewStore();
+    const c1 = store.addComment(
+      { path: "a.ts", startLine: 1, endLine: 1, text: "first" },
+      0,
+    );
+    store.startNewReview(10);
+    const pastId = store.listPastReviews()[0].id;
+
+    store.addComment(
+      { path: "b.ts", startLine: 2, endLine: 2, text: "second" },
+      20,
+    );
+    const activeId = store.getActiveReview()!.id;
+
+    expect(store.getReview(pastId)!.id).toBe(pastId);
+    expect(store.getReview(activeId)!.id).toBe(activeId);
+    expect(store.getReview("missing")).toBeUndefined();
+
+    store.editComment(c1.id, { text: "edited past" }, 30, pastId);
+    expect(store.getReview(pastId)!.comments[0].text).toBe("edited past");
+    // editing a past review does not touch the active review's activity clock
+    expect(store.getActiveReview()!.lastActivityAt).toBe(20);
+
+    store.deleteComment(c1.id, 40, pastId);
+    expect(store.getReview(pastId)!.comments).toHaveLength(0);
+  });
+
   it("calls onChange with plain-JSON state after mutations", () => {
     const snapshots: unknown[] = [];
     const store = new ReviewStore({

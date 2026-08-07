@@ -14,3 +14,12 @@ export function formatPrompt(review: Review): string {
     .map((comment) => `${formatLocation(comment)}\n${comment.text}`)
     .join("\n---\n");
 }
+
+/** First line of a comment, truncated for a one-line sidebar label. */
+export function excerptComment(text: string, maxLength = 40): string {
+  const firstLine = text.split("\n")[0]?.trim() ?? "";
+  if (firstLine.length <= maxLength) {
+    return firstLine;
+  }
+  return `${firstLine.slice(0, maxLength).trimEnd()}…`;
+}

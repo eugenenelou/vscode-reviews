@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ReviewStore } from "./core/store";
-import type { ReviewComment } from "./core/types";
+import type { Review, ReviewComment } from "./core/types";
 import { parseLocation } from "./core/location";
 import { formatPrompt } from "./core/format";
 
@@ -216,14 +216,57 @@ export class ReviewsController {
     this.disposeAllThreads();
   }
 
-  async copyPrompt(): Promise<void> {
-    const review = this.store.getActiveReview();
-    if (!review || review.comments.length === 0) {
-      vscode.window.showInformationMessage("No active review to copy.");
+  /** Copies the given review's prompt, or the active review's when none is given. */
+  async copyPrompt(review?: Review): Promise<void> {
+    const target = review ?? this.store.getActiveReview();
+    if (!target || target.comments.length === 0) {
+      vscode.window.showInformationMessage("No review to copy.");
       return;
     }
-    await vscode.env.clipboard.writeText(formatPrompt(review));
+    await vscode.env.clipboard.writeText(formatPrompt(target));
     vscode.window.showInformationMessage("Review prompt copied to clipboard.");
+  }
+
+  /** Deletes a review by id (active or past), disposing its threads if it was active. */
+  deleteReview(reviewId: string): void {
+    const wasActive = this.store.getActiveReview()?.id === reviewId;
+    this.store.deleteReview(reviewId);
+    if (wasActive) {
+      this.disposeAllThreads();
+    }
+  }
+
+  /** Sidebar-driven delete: works for a comment in the active or a past review. */
+  deleteCommentById(review: Review, commentId: string): void {
+    this.store.deleteComment(commentId, Date.now(), review.id);
+    const thread = this.threadsByCommentId.get(commentId);
+    if (thread) {
+      thread.dispose();
+      this.threadsByCommentId.delete(commentId);
+    }
+  }
+
+  /** Sidebar-driven edit: prompts with an input box, works for active or past reviews. */
+  async editCommentById(review: Review, comment: ReviewComment): Promise<void> {
+    const text = await vscode.window.showInputBox({
+      prompt: "Edit comment",
+      value: comment.text,
+      ignoreFocusOut: true,
+    });
+    if (text === undefined || text === comment.text) {
+      return;
+    }
+    this.store.editComment(comment.id, { text }, Date.now(), review.id);
+    const thread = this.threadsByCommentId.get(comment.id);
+    if (thread) {
+      const noteComment = new ReviewNoteComment(
+        comment.id,
+        text,
+        vscode.CommentMode.Preview,
+        thread,
+      );
+      thread.comments = [noteComment];
+    }
   }
 
   private disposeAllThreads(): void {

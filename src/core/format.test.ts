@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatPrompt } from "./format";
+import { excerptComment, formatPrompt } from "./format";
 import type { Review } from "./types";
 
 function review(comments: Review["comments"]): Review {
@@ -78,5 +78,21 @@ describe("formatPrompt", () => {
         "src/services/sync.py:88-91\n" +
         "extract this into a helper",
     );
+  });
+});
+
+describe("excerptComment", () => {
+  it("returns the first line unchanged when short", () => {
+    expect(excerptComment("short note")).toBe("short note");
+  });
+
+  it("truncates long text with an ellipsis", () => {
+    const text = "a".repeat(60);
+    const result = excerptComment(text, 40);
+    expect(result).toBe(`${"a".repeat(40)}…`);
+  });
+
+  it("only considers the first line of multi-line text", () => {
+    expect(excerptComment("first line\nsecond line")).toBe("first line");
   });
 });
