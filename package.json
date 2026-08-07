@@ -9,7 +9,106 @@
     "vscode": "^1.90.0"
   },
   "main": "./dist/extension.js",
-  "contributes": {},
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Reviews",
+      "properties": {
+        "vscode-reviews.idleTimeoutMinutes": {
+          "type": "number",
+          "default": 60,
+          "description": "Minutes of inactivity before adding a comment asks whether to continue the active review or start a new one."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "vscode-reviews.newReview",
+        "title": "Reviews: New review"
+      },
+      {
+        "command": "vscode-reviews.copyPrompt",
+        "title": "Reviews: Copy prompt"
+      },
+      {
+        "command": "vscode-reviews.createComment",
+        "title": "Add comment"
+      },
+      {
+        "command": "vscode-reviews.editComment",
+        "title": "Edit"
+      },
+      {
+        "command": "vscode-reviews.deleteComment",
+        "title": "Delete"
+      },
+      {
+        "command": "vscode-reviews.saveComment",
+        "title": "Save"
+      },
+      {
+        "command": "vscode-reviews.cancelEditComment",
+        "title": "Cancel"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "vscode-reviews.createComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.editComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.deleteComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.saveComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.cancelEditComment",
+          "when": "false"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "vscode-reviews.createComment",
+          "group": "inline",
+          "when": "commentController == vscode-reviews"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "vscode-reviews.editComment",
+          "group": "group@1",
+          "when": "commentController == vscode-reviews && comment == canEdit"
+        },
+        {
+          "command": "vscode-reviews.deleteComment",
+          "group": "group@2",
+          "when": "commentController == vscode-reviews && comment == canEdit"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "vscode-reviews.saveComment",
+          "group": "inline@1",
+          "when": "commentController == vscode-reviews"
+        },
+        {
+          "command": "vscode-reviews.cancelEditComment",
+          "group": "inline@2",
+          "when": "commentController == vscode-reviews"
+        }
+      ]
+    }
+  },
   "scripts": {
     "compile": "tsc -p ./",
     "test": "vitest run"
