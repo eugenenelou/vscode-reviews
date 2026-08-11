@@ -114,7 +114,7 @@ export class ReviewsTreeProvider implements vscode.TreeDataProvider<ReviewsTreeN
         const { comment } = element;
         const label = `${comment.path} — ${lineLabel(comment)} — ${excerptComment(comment.text)}`;
         const item = new vscode.TreeItem(label);
-        item.contextValue = "comment";
+        item.contextValue = comment.shortSha ? "commentAtRevision" : "comment";
         item.iconPath = new vscode.ThemeIcon("note");
         item.command = {
           command: "vscode-reviews.openComment",

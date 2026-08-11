@@ -54,9 +54,18 @@ One implicit active review per workspace:
 
 A dedicated view:
 
-- **Active review** on top: comments listed as `file — line — excerpt`; click
-  jumps to the location; inline edit/delete; review-level actions: Copy prompt,
-  New review, Delete review.
+- **Active review** on top: comments listed as `file — line — excerpt`. A
+  comment made on a plain file (no sha) opens that file on click. A comment
+  made on a committed diff version opens, on click, a diff of the file
+  between the commit's parent and the commit, cursor on the commented line —
+  or, when the file did not exist at the parent (added in that commit, or a
+  root commit), just the file at that revision, since the Git filesystem
+  provider has no left-hand document to serve. Its context menu additionally
+  offers **Open File at Revision** (the file
+  read-only, as of that commit) and **Open Current File** (the working-tree
+  file, at the stored line — which may have drifted since the comment was
+  made). Inline edit/delete; review-level actions: Copy prompt, New review,
+  Delete review.
 - **Past reviews** below, collapsed: previous reviews by date, expandable to the
   same comment list, each with its own Copy prompt and Delete.
 
@@ -89,7 +98,9 @@ vitest:
 - review lifecycle — auto-create, append, idle timeout and the remembered
   continue/new answer, with an injected clock;
 - prompt formatting — separator, ranges, `@sha` suffix presence;
-- URI parsing — GitLens/native-diff URI → repo-relative path + short sha.
+- URI parsing — GitLens/native-diff URI → repo-relative path + short sha;
+  the revision-URI round-trip (`buildRevisionUri` ↔ `parseLocation`) is
+  unit-tested to pin that both agree on the same URI shape.
 
 VSCode wiring (Comment API, sidebar tree, clipboard) is verified manually; no
 `@vscode/test-electron` harness at prototype stage.

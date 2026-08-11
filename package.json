@@ -79,6 +79,14 @@
         "title": "Open comment location"
       },
       {
+        "command": "vscode-reviews.openCommentRevision",
+        "title": "Reviews: Open File at Revision"
+      },
+      {
+        "command": "vscode-reviews.openCommentCurrent",
+        "title": "Reviews: Open Current File"
+      },
+      {
         "command": "vscode-reviews.tree.copyPrompt",
         "title": "Copy Prompt",
         "icon": "$(copy)"
@@ -128,6 +136,14 @@
         },
         {
           "command": "vscode-reviews.openComment",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.openCommentRevision",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.openCommentCurrent",
           "when": "false"
         },
         {
@@ -231,13 +247,23 @@
           "group": "inline@3"
         },
         {
+          "command": "vscode-reviews.openCommentRevision",
+          "when": "view == vscode-reviews.tree && viewItem == commentAtRevision",
+          "group": "1_navigation@1"
+        },
+        {
+          "command": "vscode-reviews.openCommentCurrent",
+          "when": "view == vscode-reviews.tree && viewItem == commentAtRevision",
+          "group": "1_navigation@2"
+        },
+        {
           "command": "vscode-reviews.tree.editComment",
-          "when": "view == vscode-reviews.tree && viewItem == comment",
+          "when": "view == vscode-reviews.tree && viewItem =~ /^comment/",
           "group": "inline@1"
         },
         {
           "command": "vscode-reviews.tree.deleteComment",
-          "when": "view == vscode-reviews.tree && viewItem == comment",
+          "when": "view == vscode-reviews.tree && viewItem =~ /^comment/",
           "group": "inline@2"
         }
       ]

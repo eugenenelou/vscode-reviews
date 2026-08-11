@@ -139,6 +139,9 @@ export class ReviewsController {
     if (!review) {
       return;
     }
+    if (isDiffOriginalSide(document.uri)) {
+      return;
+    }
     const workspaceRoot = getWorkspaceRoot(document.uri);
     const { relPath, shortSha } = parseLocation(
       document.uri.toString(),
@@ -164,6 +167,7 @@ export class ReviewsController {
     );
     const thread = this.controller.createCommentThread(uri, range, []);
     thread.canReply = false;
+    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     const noteComment = new ReviewNoteComment(
       comment.id,
       comment.text,

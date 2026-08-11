@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLocation } from "./location";
+import { buildRevisionUri, parseLocation } from "./location";
 
 const ROOT = "/home/eugene/projects/vscode-reviews";
 
@@ -31,5 +31,18 @@ describe("parseLocation", () => {
     );
     const result = parseLocation(`git:${ROOT}/src/bar.ts?${query}`, ROOT);
     expect(result).toEqual({ relPath: "src/bar.ts", shortSha: "1234567" });
+  });
+});
+
+describe("buildRevisionUri", () => {
+  it("round-trips through parseLocation, agreeing on relPath and shortSha", () => {
+    const ref = "abcdef1234567890";
+    const parts = buildRevisionUri("src/foo.ts", ref, ROOT);
+    const query = encodeURIComponent(parts.query);
+    const uriString = `${parts.scheme}:${parts.path}?${query}`;
+
+    const result = parseLocation(uriString, ROOT);
+
+    expect(result).toEqual({ relPath: "src/foo.ts", shortSha: "abcdef1" });
   });
 });
