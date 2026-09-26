@@ -69,6 +69,29 @@ A dedicated view:
 - **Past reviews** below, collapsed: previous reviews by date, expandable to the
   same comment list, each with its own Copy prompt and Delete.
 
+### Review cursor
+
+A per-branch lightweight git tag `rv/<branch>` marks the last commit reviewed
+on the branch checked out in the commit's repo (`git rev-parse --abbrev-ref
+HEAD`; detached `HEAD` → error, nothing done). GitLens renders tags before
+commit messages in its commit views, so the tag is the cursor — no GitLens API,
+no tree decoration.
+
+- **Mark reviewed** runs `git tag -f rv/<branch> <sha>`, from two entry points:
+  a context-menu item on GitLens commit rows (`viewItem =~
+  /^gitlens:commit\b/`; sha and repo read from the node's `commit.sha` /
+  `commit.repoPath`), and a Reviews view title button marking `HEAD` of the
+  workspace repo's current branch.
+- **Resync** (Reviews view title button), for the workspace repo's current
+  branch: no tag → info; tag is an ancestor of `HEAD` → up to date; otherwise
+  the tagged commit's `git patch-id --stable` is matched against those of
+  `git log -p --no-merges rv/<branch>..HEAD`, and the tag moves to the match,
+  or a warning asks to re-mark manually. No watchers, no stored state, no
+  automatic resync.
+
+Caveats: `git push --tags` publishes `rv/` tags; resync only matches when the
+marked commit's own diff is unchanged by the rewrite.
+
 ### Prompt format
 
 Copied to the clipboard as plain text, optimized for tokens. One entry per
@@ -98,6 +121,8 @@ vitest:
 - review lifecycle — auto-create, append, idle timeout and the remembered
   continue/new answer, with an injected clock;
 - prompt formatting — separator, ranges, `@sha` suffix presence;
+- review cursor — tag name, patch-id output parsing and matching, GitLens
+  commit-node shape;
 - URI parsing — GitLens/native-diff URI → repo-relative path + short sha;
   the revision-URI round-trip (`buildRevisionUri` ↔ `parseLocation`) is
   unit-tested to pin that both agree on the same URI shape.

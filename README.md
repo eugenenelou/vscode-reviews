@@ -37,6 +37,26 @@ If the active review has been idle past the configured timeout, adding a new
 comment asks whether to continue it or start fresh; the answer is remembered
 for the same duration.
 
+## Review cursor
+
+A lightweight git tag `rv/<branch>` (e.g. `rv/eugene/foo` for branch
+`eugene/foo`) marks the last commit you reviewed on the branch checked out in
+the repo. GitLens shows tags in front of commit messages, so the tag is the
+visible cursor.
+
+- **Mark reviewed** — right-click a commit in any GitLens commit view, or use
+  the ✓ button in the Reviews view title bar to mark the current branch's
+  `HEAD` in the workspace repo. Runs
+  `git tag -f rv/<branch> <sha>`.
+- **Resync review cursor** — the sync button in the Reviews view title bar.
+  After a rebase, the tagged commit is no longer in `HEAD`'s history; resync
+  finds the commit in `rv/<branch>..HEAD` with the same `git patch-id
+  --stable` and moves the tag there. Nothing runs automatically.
+
+Detached `HEAD` is refused. Caveats: `git push --tags` publishes `rv/` tags
+too; resync only finds the commit when its own diff is unchanged (a conflict
+resolution or squash into it means re-marking manually).
+
 ## Settings
 
 - `vscode-reviews.idleTimeoutMinutes` (default `60`) — minutes of inactivity

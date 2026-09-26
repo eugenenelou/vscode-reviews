@@ -1,6 +1,8 @@
 import { basename } from "node:path";
 import * as vscode from "vscode";
+import { gitLensCommitRef } from "./core/cursor";
 import { buildRevisionUri } from "./core/location";
+import { markReviewed, resyncCursor } from "./cursor";
 import { ReviewStore } from "./core/store";
 import type { ReviewComment } from "./core/types";
 import {
@@ -134,6 +136,76 @@ async function openComment(
     `${basename(comment.path)} (${comment.shortSha})`,
     { selection: new vscode.Range(line, 0, line, 0) },
   );
+}
+
+function workspaceRootFor(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function runGit<T>(action: () => T): T | undefined {
+  try {
+    return action();
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Reviews: git failed — ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+function markCommitReviewed(cwd: string, ref: string): void {
+  const result = runGit(() => markReviewed(cwd, ref));
+  if (result?.kind === "detached") {
+    vscode.window.showErrorMessage(
+      "Reviews: HEAD is detached — no branch to mark reviewed.",
+    );
+  } else if (result?.kind === "marked") {
+    vscode.window.showInformationMessage(
+      `Reviews: ${result.tag} → ${result.sha.slice(0, 7)}`,
+    );
+  }
+}
+
+function markHeadReviewed(): void {
+  const cwd = workspaceRootFor();
+  if (cwd) {
+    markCommitReviewed(cwd, "HEAD");
+  }
+}
+
+function resyncReviewCursor(): void {
+  const cwd = workspaceRootFor();
+  if (!cwd) {
+    return;
+  }
+  const result = runGit(() => resyncCursor(cwd));
+  switch (result?.kind) {
+    case "detached":
+      vscode.window.showErrorMessage(
+        "Reviews: HEAD is detached — no branch to resync.",
+      );
+      break;
+    case "noTag":
+      vscode.window.showInformationMessage(
+        `Reviews: no review cursor (${result.tag}) on this branch.`,
+      );
+      break;
+    case "upToDate":
+      vscode.window.showInformationMessage(
+        `Reviews: cursor ${result.tag} is up to date.`,
+      );
+      break;
+    case "moved":
+      vscode.window.showInformationMessage(
+        `Reviews: moved ${result.tag} from ${result.from.slice(0, 7)} to ${result.to.slice(0, 7)}.`,
+      );
+      break;
+    case "notFound":
+      vscode.window.showWarningMessage(
+        `Reviews: the commit marked by ${result.tag} is no longer on this branch with the same diff — re-mark the last reviewed commit manually.`,
+      );
+      break;
+  }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -276,6 +348,27 @@ export function activate(context: vscode.ExtensionContext) {
           reviews.deleteCommentById(node.review, node.comment.id);
         }
       },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.markReviewed",
+      markHeadReviewed,
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.gitlens.markReviewed",
+      (node: unknown) => {
+        const ref = gitLensCommitRef(node);
+        if (!ref) {
+          vscode.window.showErrorMessage(
+            "Reviews: could not read a commit from this GitLens item.",
+          );
+          return;
+        }
+        markCommitReviewed(ref.repoPath, ref.sha);
+      },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.resyncCursor",
+      resyncReviewCursor,
     ),
     vscode.commands.registerCommand(
       "vscode-reviews.tree.copyLink",

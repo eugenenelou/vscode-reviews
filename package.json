@@ -110,6 +110,21 @@
         "command": "vscode-reviews.tree.deleteComment",
         "title": "Delete Comment",
         "icon": "$(close)"
+      },
+      {
+        "command": "vscode-reviews.markReviewed",
+        "title": "Reviews: Mark reviewed",
+        "icon": "$(check)"
+      },
+      {
+        "command": "vscode-reviews.gitlens.markReviewed",
+        "title": "Reviews: Mark reviewed",
+        "icon": "$(check)"
+      },
+      {
+        "command": "vscode-reviews.resyncCursor",
+        "title": "Reviews: Resync review cursor",
+        "icon": "$(sync)"
       }
     ],
     "menus": {
@@ -165,6 +180,10 @@
         {
           "command": "vscode-reviews.tree.deleteComment",
           "when": "false"
+        },
+        {
+          "command": "vscode-reviews.gitlens.markReviewed",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -208,6 +227,16 @@
           "command": "vscode-reviews.copyPrompt",
           "when": "view == vscode-reviews.tree",
           "group": "navigation@2"
+        },
+        {
+          "command": "vscode-reviews.markReviewed",
+          "when": "view == vscode-reviews.tree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "vscode-reviews.resyncCursor",
+          "when": "view == vscode-reviews.tree",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -265,6 +294,11 @@
           "command": "vscode-reviews.tree.deleteComment",
           "when": "view == vscode-reviews.tree && viewItem =~ /^comment/",
           "group": "inline@2"
+        },
+        {
+          "command": "vscode-reviews.gitlens.markReviewed",
+          "when": "viewItem =~ /^gitlens:commit\\b/",
+          "group": "9_reviews"
         }
       ]
     }
