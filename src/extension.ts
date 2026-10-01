@@ -61,10 +61,15 @@ async function resolveRepository(
 }
 
 /**
- * The parent ref to diff against, or undefined when there is nothing to diff:
- * no parent commit (root), or the file didn't exist yet at the parent (added
- * in this commit) — the Git filesystem provider throws "file not found" rather
- * than serving an empty document for those.
+ * Left side of the diff for a file with no parent version (added in the
+ * commit, or a root commit): the Git filesystem provider throws "file not
+ * found" rather than serving an empty document, so we serve one ourselves.
+ */
+const EMPTY_DOCUMENT_SCHEME = "vscode-reviews-empty";
+
+/**
+ * The parent ref to diff against, or undefined when the file has no parent
+ * version: no parent commit (root), or the file didn't exist yet at the parent.
  */
 async function resolveDiffBase(
   repository: GitRepository,
@@ -87,8 +92,8 @@ async function resolveDiffBase(
 /**
  * Default click on a comment: opens the working-tree file when there's no
  * shortSha, otherwise a diff of the file between the commit's parent and the
- * commit itself, with the cursor on the commented line. Falls back to the
- * file at that revision alone when there is no parent version to diff against.
+ * commit itself (against an empty document when the file was added in that
+ * commit), with the cursor on the commented line.
  */
 async function openComment(
   comment: ReviewComment,
@@ -121,14 +126,9 @@ async function openComment(
     return;
   }
 
-  if (!base) {
-    await openAndReveal(revisionUri, line);
-    return;
-  }
-
-  const leftUri = vscode.Uri.from(
-    buildRevisionUri(comment.path, base, root.uri.fsPath),
-  );
+  const leftUri = base
+    ? vscode.Uri.from(buildRevisionUri(comment.path, base, root.uri.fsPath))
+    : revisionUri.with({ scheme: EMPTY_DOCUMENT_SCHEME, query: "" });
   await vscode.commands.executeCommand(
     "vscode.diff",
     leftUri,
@@ -231,6 +231,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     reviews,
     treeView,
+    vscode.workspace.registerTextDocumentContentProvider(
+      EMPTY_DOCUMENT_SCHEME,
+      { provideTextDocumentContent: () => "" },
+    ),
     vscode.workspace.onDidOpenTextDocument((doc) =>
       reviews.renderDocument(doc),
     ),

@@ -57,10 +57,10 @@ A dedicated view:
 - **Active review** on top: comments listed as `file — line — excerpt`. A
   comment made on a plain file (no sha) opens that file on click. A comment
   made on a committed diff version opens, on click, a diff of the file
-  between the commit's parent and the commit, cursor on the commented line —
-  or, when the file did not exist at the parent (added in that commit, or a
-  root commit), just the file at that revision, since the Git filesystem
-  provider has no left-hand document to serve. Its context menu additionally
+  between the commit's parent and the commit, cursor on the commented line.
+  When the file did not exist at the parent (added in that commit, or a root
+  commit) the left-hand side is an empty document served by the extension,
+  since the Git filesystem provider has none. Its context menu additionally
   offers **Open File at Revision** (the file
   read-only, as of that commit) and **Open Current File** (the working-tree
   file, at the stored line — which may have drifted since the comment was

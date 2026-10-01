@@ -20,9 +20,9 @@ a single **active review** you can copy as a prompt for an AI agent.
    a tree: the active review's comments on top, past reviews below,
    collapsed, each expandable to its own comment list. Clicking a comment
    made on a committed diff version opens a diff of that file between the
-   commit's parent and the commit, with the cursor on the commented line —
-   or just the file at that revision when it was added in that commit and
-   there is no earlier version to diff against. Right-click it for **Open File at Revision** (the file as of that commit,
+   commit's parent and the commit, with the cursor on the commented line
+   (against an empty left side when the file was added in that commit).
+   Right-click it for **Open File at Revision** (the file as of that commit,
    read-only) or **Open Current File** (the working-tree file, at the
    stored — possibly since-drifted — line). A comment made on a plain file
    (no revision) just opens that file. Right-click (or use the inline icons)

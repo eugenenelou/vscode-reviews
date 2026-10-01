@@ -110,7 +110,11 @@ async function promptContinueOrNew(): Promise<boolean> {
 }
 
 export class ReviewsController {
-  private readonly threadsByCommentId = new Map<string, vscode.CommentThread>();
+  /** One thread per document showing the comment: the same revision can be open as gitlens:// and git:// documents. */
+  private readonly threadsByCommentId = new Map<
+    string,
+    vscode.CommentThread[]
+  >();
   readonly controller: vscode.CommentController;
 
   constructor(
@@ -147,14 +151,48 @@ export class ReviewsController {
       document.uri.toString(),
       workspaceRoot,
     );
+    const key = document.uri.toString();
     for (const comment of review.comments) {
-      if (this.threadsByCommentId.has(comment.id)) {
-        continue;
-      }
       if (comment.path !== relPath || comment.shortSha !== shortSha) {
         continue;
       }
-      this.renderComment(document.uri, comment);
+      const rendered = this.threadsFor(comment.id).some(
+        (thread) => thread.uri.toString() === key,
+      );
+      if (!rendered) {
+        this.renderComment(document.uri, comment);
+      }
+    }
+  }
+
+  private threadsFor(commentId: string): vscode.CommentThread[] {
+    return this.threadsByCommentId.get(commentId) ?? [];
+  }
+
+  private trackThread(commentId: string, thread: vscode.CommentThread): void {
+    this.threadsByCommentId.set(commentId, [
+      ...this.threadsFor(commentId),
+      thread,
+    ]);
+  }
+
+  private disposeThreads(commentId: string): void {
+    for (const thread of this.threadsFor(commentId)) {
+      thread.dispose();
+    }
+    this.threadsByCommentId.delete(commentId);
+  }
+
+  private setCommentText(commentId: string, text: string): void {
+    for (const thread of this.threadsFor(commentId)) {
+      thread.comments = [
+        new ReviewNoteComment(
+          commentId,
+          text,
+          vscode.CommentMode.Preview,
+          thread,
+        ),
+      ];
     }
   }
 
@@ -175,7 +213,7 @@ export class ReviewsController {
       thread,
     );
     thread.comments = [noteComment];
-    this.threadsByCommentId.set(comment.id, thread);
+    this.trackThread(comment.id, thread);
   }
 
   async createComment(reply: vscode.CommentReply): Promise<void> {
@@ -215,7 +253,7 @@ export class ReviewsController {
       thread,
     );
     thread.comments = [noteComment];
-    this.threadsByCommentId.set(comment.id, thread);
+    this.trackThread(comment.id, thread);
   }
 
   editComment(comment: ReviewCommentHandle): void {
@@ -235,19 +273,14 @@ export class ReviewsController {
   }
 
   saveComment(comment: ReviewCommentHandle): void {
-    comment.mode = vscode.CommentMode.Preview;
-    comment.parent.comments = [...comment.parent.comments];
-    this.store.editComment(
-      comment.id,
-      { text: String(comment.body) },
-      Date.now(),
-    );
+    const text = String(comment.body);
+    this.store.editComment(comment.id, { text }, Date.now());
+    this.setCommentText(comment.id, text);
   }
 
   deleteComment(comment: ReviewCommentHandle): void {
     this.store.deleteComment(comment.id, Date.now());
-    this.threadsByCommentId.delete(comment.id);
-    comment.parent.dispose();
+    this.disposeThreads(comment.id);
   }
 
   async newReview(): Promise<void> {
@@ -288,11 +321,7 @@ export class ReviewsController {
   /** Sidebar-driven delete: works for a comment in the active or a past review. */
   deleteCommentById(review: Review, commentId: string): void {
     this.store.deleteComment(commentId, Date.now(), review.id);
-    const thread = this.threadsByCommentId.get(commentId);
-    if (thread) {
-      thread.dispose();
-      this.threadsByCommentId.delete(commentId);
-    }
+    this.disposeThreads(commentId);
   }
 
   /** Sidebar-driven edit: prompts with an input box, works for active or past reviews. */
@@ -306,22 +335,12 @@ export class ReviewsController {
       return;
     }
     this.store.editComment(comment.id, { text }, Date.now(), review.id);
-    const thread = this.threadsByCommentId.get(comment.id);
-    if (thread) {
-      const noteComment = new ReviewNoteComment(
-        comment.id,
-        text,
-        vscode.CommentMode.Preview,
-        thread,
-      );
-      thread.comments = [noteComment];
-    }
+    this.setCommentText(comment.id, text);
   }
 
   private disposeAllThreads(): void {
-    for (const thread of this.threadsByCommentId.values()) {
-      thread.dispose();
+    for (const commentId of [...this.threadsByCommentId.keys()]) {
+      this.disposeThreads(commentId);
     }
-    this.threadsByCommentId.clear();
   }
 }
