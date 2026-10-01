@@ -1,7 +1,14 @@
-import { basename } from "node:path";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import { gitLensCommitRef } from "./core/cursor";
-import { buildRevisionUri } from "./core/location";
+import {
+  commitDiffSides,
+  diffTitle,
+  EMPTY_DOCUMENT_SCHEME,
+  openAndReveal,
+  revisionUri,
+  type DiffSides,
+} from "./diff";
 import { markReviewed, resyncCursor } from "./cursor";
 import { ReviewStore } from "./core/store";
 import type { ReviewComment } from "./core/types";
@@ -13,87 +20,22 @@ import {
 } from "./persistence";
 import { ReviewsController, type ReviewCommentHandle } from "./reviews";
 import { ReviewsTreeProvider, type ReviewsTreeNode } from "./tree";
-
-/** The subset of the built-in Git extension's API used to resolve a commit's parent. */
-interface GitCommit {
-  hash: string;
-  parents: string[];
-}
-
-interface GitRepository {
-  getCommit(ref: string): Promise<GitCommit>;
-  getObjectDetails(
-    treeish: string,
-    path: string,
-  ): Promise<{ mode: string; object: string; size: number }>;
-}
-
-interface GitAPI {
-  getRepository(uri: vscode.Uri): GitRepository | null;
-}
-
-interface GitExtensionExports {
-  getAPI(version: 1): GitAPI;
-}
-
-/** Opens a document and reveals/selects the given (0-indexed) line. */
-async function openAndReveal(uri: vscode.Uri, line: number): Promise<void> {
-  const document = await vscode.workspace.openTextDocument(uri);
-  const editor = await vscode.window.showTextDocument(document);
-  const clampedLine = Math.max(line, 0);
-  const range = new vscode.Range(clampedLine, 0, clampedLine, 0);
-  editor.selection = new vscode.Selection(range.start, range.start);
-  editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
-}
-
-async function resolveRepository(
-  uri: vscode.Uri,
-): Promise<GitRepository | undefined> {
-  const gitExtension =
-    vscode.extensions.getExtension<GitExtensionExports>("vscode.git");
-  if (!gitExtension) {
-    return undefined;
-  }
-  const exports = gitExtension.isActive
-    ? gitExtension.exports
-    : await gitExtension.activate();
-  return exports.getAPI(1).getRepository(uri) ?? undefined;
-}
-
-/**
- * Left side of the diff for a file with no parent version (added in the
- * commit, or a root commit): the Git filesystem provider throws "file not
- * found" rather than serving an empty document, so we serve one ourselves.
- */
-const EMPTY_DOCUMENT_SCHEME = "vscode-reviews-empty";
-
-/**
- * The parent ref to diff against, or undefined when the file has no parent
- * version: no parent commit (root), or the file didn't exist yet at the parent.
- */
-async function resolveDiffBase(
-  repository: GitRepository,
-  sha: string,
-  path: string,
-): Promise<string | undefined> {
-  const commit = await repository.getCommit(sha);
-  const parent = commit.parents[0];
-  if (!parent) {
-    return undefined;
-  }
-  try {
-    await repository.getObjectDetails(parent, path);
-    return parent;
-  } catch {
-    return undefined;
-  }
-}
+import { groupByTier, fileKey, type GuideCommit } from "./core/guide";
+import {
+  GuideNotes,
+  GuideState,
+  GuideTreeProvider,
+  guideDecorations,
+  openGuideFile,
+  openMultiDiff,
+  type GuideNoteComment,
+  type GuideTreeNode,
+} from "./guideView";
 
 /**
  * Default click on a comment: opens the working-tree file when there's no
  * shortSha, otherwise a diff of the file between the commit's parent and the
- * commit itself (against an empty document when the file was added in that
- * commit), with the cursor on the commented line.
+ * commit itself, with the cursor on the commented line.
  */
 async function openComment(
   comment: ReviewComment,
@@ -106,18 +48,9 @@ async function openComment(
     return;
   }
 
-  const revisionUri = vscode.Uri.from(
-    buildRevisionUri(comment.path, comment.shortSha, root.uri.fsPath),
-  );
-
-  let base: string | undefined;
+  let sides: DiffSides | undefined;
   try {
-    const repository = await resolveRepository(fileUri);
-    if (!repository) {
-      await openAndReveal(revisionUri, line);
-      return;
-    }
-    base = await resolveDiffBase(repository, comment.shortSha, comment.path);
+    sides = await commitDiffSides(root, comment.shortSha, comment.path);
   } catch {
     vscode.window.showWarningMessage(
       `Revision ${comment.shortSha} is no longer in this repo.`,
@@ -125,15 +58,18 @@ async function openComment(
     await openAndReveal(fileUri, line);
     return;
   }
-
-  const leftUri = base
-    ? vscode.Uri.from(buildRevisionUri(comment.path, base, root.uri.fsPath))
-    : revisionUri.with({ scheme: EMPTY_DOCUMENT_SCHEME, query: "" });
+  if (!sides) {
+    await openAndReveal(
+      revisionUri(root, comment.path, comment.shortSha),
+      line,
+    );
+    return;
+  }
   await vscode.commands.executeCommand(
     "vscode.diff",
-    leftUri,
-    revisionUri,
-    `${basename(comment.path)} (${comment.shortSha})`,
+    sides.left,
+    sides.right,
+    diffTitle(comment.path, comment.shortSha),
     { selection: new vscode.Range(line, 0, line, 0) },
   );
 }
@@ -228,19 +164,158 @@ export function activate(context: vscode.ExtensionContext) {
     treeDataProvider: treeProvider,
   });
 
+  const root = vscode.workspace.workspaceFolders?.[0];
+  const guide = new GuideState(
+    join(fileStore.dir, "guides"),
+    fileStore.root,
+    context.workspaceState,
+  );
+  const guideNotes = new GuideNotes(guide, root?.uri.fsPath ?? fileStore.root);
+  const guideView = vscode.window.createTreeView("vscode-reviews.guide", {
+    treeDataProvider: new GuideTreeProvider(
+      guide,
+      root?.uri ?? vscode.Uri.file(fileStore.root),
+    ),
+    manageCheckboxStateManually: true,
+  });
+  const guideWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(vscode.Uri.file(guide.guidesDir), "*.json"),
+  );
+  guide.onDidChange(() => {
+    guideNotes.rerender();
+    const snapshot = guide.snapshot;
+    if (!snapshot) {
+      guideView.description = undefined;
+      return;
+    }
+    const shas = [...snapshot.current.values()].filter(
+      (sha) => sha !== undefined,
+    );
+    const reviewed = shas.filter(
+      (sha) => guide.reviewState(sha) !== "unreviewed",
+    ).length;
+    guideView.description = `${snapshot.guide.branch} · ${reviewed}/${snapshot.guide.commits.length} reviewed`;
+  });
+  guide.reload();
+
+  const markGuideCommit = (sha: string) => {
+    markCommitReviewed(fileStore.root, sha);
+    guide.reload();
+  };
+
+  const offerMarkReviewed = async (commit: GuideCommit, sha: string) => {
+    const choice = await vscode.window.showInformationMessage(
+      `All files of "${commit.subject}" checked.`,
+      "Mark reviewed",
+    );
+    if (choice === "Mark reviewed") {
+      markGuideCommit(sha);
+    }
+  };
+
   context.subscriptions.push(
     reviews,
     treeView,
+    guideNotes,
+    guideView,
+    guideWatcher,
+    guideWatcher.onDidCreate(() => guide.reload()),
+    guideWatcher.onDidChange(() => guide.reload()),
+    guideWatcher.onDidDelete(() => guide.reload()),
+    guideView.onDidChangeVisibility((event) => {
+      if (event.visible) {
+        guide.reload();
+      }
+    }),
+    guideView.onDidChangeCheckboxState(async (event) => {
+      const changes = event.items.flatMap(([node, checkState]) =>
+        node.kind === "file"
+          ? [{ node, on: checkState === vscode.TreeItemCheckboxState.Checked }]
+          : [],
+      );
+      await guide.setChecked(
+        changes.map(({ node, on }) => ({
+          key: fileKey(node.commit, node.file),
+          on,
+        })),
+      );
+      const checked = guide.checked();
+      const completed = new Map(
+        changes
+          .filter(
+            ({ node, on }) =>
+              on &&
+              node.commit.files.every((f) =>
+                checked.has(fileKey(node.commit, f)),
+              ),
+          )
+          .map(({ node }) => [node.commit, node.sha]),
+      );
+      for (const [commit, sha] of completed) {
+        await offerMarkReviewed(commit, sha);
+      }
+    }),
+    vscode.window.registerFileDecorationProvider(guideDecorations),
+    vscode.commands.registerCommand("vscode-reviews.guide.refresh", () =>
+      guide.reload(),
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.openFile",
+      async (node: GuideTreeNode) => {
+        if (root && node.kind === "file") {
+          await openGuideFile(root, node.sha, node.file);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.openMultiDiff",
+      async (node: GuideTreeNode) => {
+        if (!root) {
+          return;
+        }
+        if (node.kind === "tier") {
+          await openMultiDiff(
+            root,
+            node.sha,
+            `${node.commit.subject} — ${node.tier}`,
+            node.files,
+          );
+        } else if (node.kind === "commit" && node.sha) {
+          const files = groupByTier(node.commit)
+            .filter((group) => group.tier !== "skip")
+            .flatMap((group) => group.files);
+          await openMultiDiff(root, node.sha, node.commit.subject, files);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.markReviewed",
+      (node: GuideTreeNode) => {
+        if (node.kind === "commit" && node.sha) {
+          markGuideCommit(node.sha);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.promoteNote",
+      async (comment: GuideNoteComment) => {
+        await reviews.addComment(comment.input);
+        await guide.markPromoted(comment.key);
+        guideNotes.rerender();
+      },
+    ),
     vscode.workspace.registerTextDocumentContentProvider(
       EMPTY_DOCUMENT_SCHEME,
       { provideTextDocumentContent: () => "" },
     ),
-    vscode.workspace.onDidOpenTextDocument((doc) =>
-      reviews.renderDocument(doc),
-    ),
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      reviews.renderDocument(doc);
+      guideNotes.renderDocument(doc);
+    }),
     vscode.window.onDidChangeVisibleTextEditors((editors) => {
       for (const editor of editors) {
         reviews.renderDocument(editor.document);
+        guideNotes.renderDocument(editor.document);
       }
     }),
     vscode.commands.registerCommand(
@@ -289,13 +364,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!root) {
           return;
         }
-        const uri = vscode.Uri.from(
-          buildRevisionUri(
-            node.comment.path,
-            node.comment.shortSha,
-            root.uri.fsPath,
-          ),
-        );
+        const uri = revisionUri(root, node.comment.path, node.comment.shortSha);
         await openAndReveal(uri, node.comment.startLine - 1);
       },
     ),
@@ -353,10 +422,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
       },
     ),
-    vscode.commands.registerCommand(
-      "vscode-reviews.markReviewed",
-      markHeadReviewed,
-    ),
+    vscode.commands.registerCommand("vscode-reviews.markReviewed", () => {
+      markHeadReviewed();
+      guide.reload();
+    }),
     vscode.commands.registerCommand(
       "vscode-reviews.gitlens.markReviewed",
       (node: unknown) => {
@@ -368,12 +437,13 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
         markCommitReviewed(ref.repoPath, ref.sha);
+        guide.reload();
       },
     ),
-    vscode.commands.registerCommand(
-      "vscode-reviews.resyncCursor",
-      resyncReviewCursor,
-    ),
+    vscode.commands.registerCommand("vscode-reviews.resyncCursor", () => {
+      resyncReviewCursor();
+      guide.reload();
+    }),
     vscode.commands.registerCommand(
       "vscode-reviews.tree.copyLink",
       (node: ReviewsTreeNode) => {

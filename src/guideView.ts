@@ -1,0 +1,551 @@
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import * as vscode from "vscode";
+import {
+  commitProgress,
+  commitReviewState,
+  fileKey,
+  groupByTier,
+  latestGuideFor,
+  matchGuideCommits,
+  noteKey,
+  parseGuide,
+  type CommitReviewState,
+  type Guide,
+  type GuideCommit,
+  type GuideFile,
+  type GuideNote,
+  type Tier,
+} from "./core/guide";
+import { parseLocation } from "./core/location";
+import type { NewCommentInput } from "./core/store";
+import { branchHistory, currentBranch, cursorSha } from "./cursor";
+import { commitDiffSides, diffTitle } from "./diff";
+import { isDiffOriginalSide } from "./reviews";
+
+const CHECKED_KEY = "vscode-reviews.guide.checked";
+const PROMOTED_KEY = "vscode-reviews.guide.promoted";
+const DECORATION_SCHEME = "vscode-reviews-guide";
+
+export interface GuideSnapshot {
+  guide: Guide;
+  /** Each guide commit's sha on the branch now; undefined when stale. */
+  current: Map<GuideCommit, string | undefined>;
+  orderedShas: string[];
+  cursor: string | undefined;
+}
+
+type GuideLoad =
+  | { kind: "message"; text: string; detail?: string }
+  | { kind: "ok"; snapshot: GuideSnapshot; invalid: string[] };
+
+/** Loads the current branch's newest guide and owns the per-workspace checked/promoted sets. */
+export class GuideState {
+  private load: GuideLoad = { kind: "message", text: "Loading…" };
+  private readonly emitter = new vscode.EventEmitter<void>();
+  readonly onDidChange = this.emitter.event;
+
+  constructor(
+    readonly guidesDir: string,
+    private readonly cwd: string,
+    private readonly memento: vscode.Memento,
+  ) {
+    mkdirSync(guidesDir, { recursive: true });
+  }
+
+  get current(): GuideLoad {
+    return this.load;
+  }
+
+  get snapshot(): GuideSnapshot | undefined {
+    return this.load.kind === "ok" ? this.load.snapshot : undefined;
+  }
+
+  reload(): void {
+    this.load = this.compute();
+    this.emitter.fire();
+  }
+
+  private compute(): GuideLoad {
+    let branch: string | undefined;
+    try {
+      branch = currentBranch(this.cwd);
+    } catch {
+      return { kind: "message", text: "Not a git repository" };
+    }
+    if (!branch) {
+      return { kind: "message", text: "HEAD is detached" };
+    }
+    const guides: Guide[] = [];
+    const invalid: string[] = [];
+    const names = existsSync(this.guidesDir)
+      ? readdirSync(this.guidesDir).filter((n) => n.endsWith(".json"))
+      : [];
+    for (const name of names) {
+      try {
+        const json: unknown = JSON.parse(
+          readFileSync(join(this.guidesDir, name), "utf8"),
+        );
+        guides.push(parseGuide(name.replace(/\.json$/, ""), json));
+      } catch (error) {
+        invalid.push(
+          `${name} — ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    const guide = latestGuideFor(guides, branch);
+    if (!guide) {
+      return {
+        kind: "message",
+        text: `No guide for ${branch}`,
+        detail: invalid.length
+          ? `invalid guide files: ${invalid.join("; ")}`
+          : "run /prepare-review",
+      };
+    }
+    try {
+      const history = branchHistory(this.cwd, guide.base);
+      return {
+        kind: "ok",
+        invalid,
+        snapshot: {
+          guide,
+          current: matchGuideCommits(guide.commits, history),
+          orderedShas: history.map((c) => c.sha),
+          cursor: cursorSha(this.cwd, branch),
+        },
+      };
+    } catch (error) {
+      return {
+        kind: "message",
+        text: "Could not read the branch history",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  reviewState(sha: string): CommitReviewState {
+    const snapshot = this.snapshot;
+    return snapshot
+      ? commitReviewState(sha, snapshot.orderedShas, snapshot.cursor)
+      : "unreviewed";
+  }
+
+  checked(): Set<string> {
+    return new Set(this.memento.get<string[]>(CHECKED_KEY, []));
+  }
+
+  async setChecked(keys: { key: string; on: boolean }[]): Promise<void> {
+    const checked = this.checked();
+    for (const { key, on } of keys) {
+      if (on) {
+        checked.add(key);
+      } else {
+        checked.delete(key);
+      }
+    }
+    await this.memento.update(CHECKED_KEY, [...checked]);
+    this.emitter.fire();
+  }
+
+  isPromoted(key: string): boolean {
+    return this.memento.get<string[]>(PROMOTED_KEY, []).includes(key);
+  }
+
+  async markPromoted(key: string): Promise<void> {
+    await this.memento.update(PROMOTED_KEY, [
+      ...this.memento.get<string[]>(PROMOTED_KEY, []),
+      key,
+    ]);
+  }
+}
+
+export type GuideTreeNode =
+  | { kind: "message"; text: string; detail?: string }
+  | { kind: "commit"; commit: GuideCommit; sha: string | undefined }
+  | {
+      kind: "tier";
+      commit: GuideCommit;
+      sha: string;
+      tier: Tier;
+      files: GuideFile[];
+    }
+  | { kind: "file"; commit: GuideCommit; sha: string; file: GuideFile };
+
+const TIER_STYLE: Record<Tier, { label: string; icon: string; color: string }> =
+  {
+    critical: { label: "Critical", icon: "circle-filled", color: "charts.red" },
+    review: { label: "Review", icon: "circle-filled", color: "charts.yellow" },
+    skim: { label: "Skim", icon: "circle-filled", color: "disabledForeground" },
+    skip: { label: "Skip", icon: "circle-slash", color: "disabledForeground" },
+  };
+
+function commitDecorationUri(
+  sha: string,
+  state: CommitReviewState,
+): vscode.Uri {
+  return vscode.Uri.from({
+    scheme: DECORATION_SCHEME,
+    path: `/${sha}`,
+    query: state,
+  });
+}
+
+/** Dims reviewed commits and colors the cursor commit; ThemeIcon colors can't reach the label. */
+export const guideDecorations: vscode.FileDecorationProvider = {
+  provideFileDecoration(uri) {
+    if (uri.scheme !== DECORATION_SCHEME) {
+      return undefined;
+    }
+    if (uri.query === "reviewed") {
+      return new vscode.FileDecoration(
+        undefined,
+        "reviewed",
+        new vscode.ThemeColor("disabledForeground"),
+      );
+    }
+    if (uri.query === "cursor") {
+      return new vscode.FileDecoration(
+        "rv",
+        "review cursor",
+        new vscode.ThemeColor("charts.green"),
+      );
+    }
+    return undefined;
+  },
+};
+
+export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode> {
+  private readonly emitter = new vscode.EventEmitter<
+    GuideTreeNode | undefined
+  >();
+  readonly onDidChangeTreeData = this.emitter.event;
+
+  constructor(
+    private readonly state: GuideState,
+    private readonly rootUri: vscode.Uri,
+  ) {
+    state.onDidChange(() => this.emitter.fire(undefined));
+  }
+
+  getChildren(element?: GuideTreeNode): GuideTreeNode[] {
+    if (!element) {
+      const load = this.state.current;
+      if (load.kind === "message") {
+        return [load];
+      }
+      const { snapshot, invalid } = load;
+      return [
+        ...snapshot.guide.commits.map(
+          (commit) =>
+            ({
+              kind: "commit",
+              commit,
+              sha: snapshot.current.get(commit),
+            }) as const,
+        ),
+        ...invalid.map(
+          (text) =>
+            ({
+              kind: "message",
+              text: "Invalid guide file",
+              detail: text,
+            }) as const,
+        ),
+      ];
+    }
+    if (element.kind === "commit" && element.sha) {
+      const sha = element.sha;
+      return groupByTier(element.commit).map((group) => ({
+        kind: "tier",
+        commit: element.commit,
+        sha,
+        tier: group.tier,
+        files: group.files,
+      }));
+    }
+    if (element.kind === "tier") {
+      return element.files.map((file) => ({
+        kind: "file",
+        commit: element.commit,
+        sha: element.sha,
+        file,
+      }));
+    }
+    return [];
+  }
+
+  /** The first commit not yet reviewed, which opens expanded. */
+  private nextToReview(): GuideCommit | undefined {
+    const snapshot = this.state.snapshot;
+    return snapshot?.guide.commits.find((c) => {
+      const sha = snapshot.current.get(c);
+      return sha && this.state.reviewState(sha) === "unreviewed";
+    });
+  }
+
+  getTreeItem(element: GuideTreeNode): vscode.TreeItem {
+    switch (element.kind) {
+      case "message": {
+        const item = new vscode.TreeItem(element.text);
+        item.description = element.detail;
+        item.tooltip = element.detail;
+        return item;
+      }
+      case "commit":
+        return this.commitItem(element.commit, element.sha);
+      case "tier": {
+        const style = TIER_STYLE[element.tier];
+        const item = new vscode.TreeItem(
+          style.label,
+          element.tier === "skip"
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.Expanded,
+        );
+        const count = element.files.length;
+        item.description = `${count} file${count === 1 ? "" : "s"}`;
+        item.iconPath = new vscode.ThemeIcon(
+          style.icon,
+          new vscode.ThemeColor(style.color),
+        );
+        item.contextValue = "guideTier";
+        return item;
+      }
+      case "file":
+        return this.fileItem(element.commit, element.sha, element.file);
+    }
+  }
+
+  private commitItem(
+    commit: GuideCommit,
+    sha: string | undefined,
+  ): vscode.TreeItem {
+    const item = new vscode.TreeItem(commit.subject);
+    const tooltip = new vscode.MarkdownString(
+      `**${commit.subject}**\n\n${commit.summary}`,
+    );
+    for (const flag of commit.flags) {
+      tooltip.appendMarkdown(`\n\n⚑ ${flag}`);
+    }
+    item.tooltip = tooltip;
+    const flags = commit.flags.length ? ` · ⚑ ${commit.flags.length}` : "";
+    if (!sha) {
+      item.description = "stale — re-run /prepare-review";
+      item.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      item.contextValue = "guideCommitStale";
+      return item;
+    }
+    const state = this.state.reviewState(sha);
+    const short = sha.slice(0, 7);
+    item.resourceUri = commitDecorationUri(sha, state);
+    item.contextValue = "guideCommit";
+    item.collapsibleState =
+      commit === this.nextToReview()
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed;
+    if (state === "unreviewed") {
+      const { done, total } = commitProgress(commit, this.state.checked());
+      item.description = `${short} · ${done}/${total}${flags}`;
+      item.iconPath = new vscode.ThemeIcon("git-commit");
+    } else if (state === "cursor") {
+      item.description = `${short} · review cursor${flags}`;
+      item.iconPath = new vscode.ThemeIcon(
+        "bookmark",
+        new vscode.ThemeColor("charts.green"),
+      );
+    } else {
+      item.description = `${short} · reviewed${flags}`;
+      item.iconPath = new vscode.ThemeIcon(
+        "check",
+        new vscode.ThemeColor("disabledForeground"),
+      );
+    }
+    return item;
+  }
+
+  private fileItem(
+    commit: GuideCommit,
+    sha: string,
+    file: GuideFile,
+  ): vscode.TreeItem {
+    const item = new vscode.TreeItem(file.path);
+    item.resourceUri = vscode.Uri.joinPath(this.rootUri, file.path);
+    item.iconPath = vscode.ThemeIcon.File;
+    const startHere = commit.files[0] === file ? "★ start here · " : "";
+    const notes = file.notes.length
+      ? ` · ${file.notes.length} note${file.notes.length === 1 ? "" : "s"}`
+      : "";
+    item.description = `${startHere}${file.reason}${notes}`;
+    item.tooltip = file.reason;
+    item.contextValue = "guideFile";
+    if (this.state.reviewState(sha) === "unreviewed") {
+      item.checkboxState = this.state.checked().has(fileKey(commit, file))
+        ? vscode.TreeItemCheckboxState.Checked
+        : vscode.TreeItemCheckboxState.Unchecked;
+    }
+    item.command = {
+      command: "vscode-reviews.guide.openFile",
+      title: "Open diff",
+      arguments: [{ kind: "file", commit, sha, file } satisfies GuideTreeNode],
+    };
+    return item;
+  }
+}
+
+/** Opens one file's diff in the commit, on its first note's line. */
+export async function openGuideFile(
+  root: vscode.WorkspaceFolder,
+  sha: string,
+  file: GuideFile,
+): Promise<void> {
+  const sides = await commitDiffSides(root, sha, file.path);
+  if (!sides) {
+    vscode.window.showErrorMessage(
+      "Reviews: no Git repository for this workspace.",
+    );
+    return;
+  }
+  const line = Math.max((file.notes[0]?.startLine ?? 1) - 1, 0);
+  await vscode.commands.executeCommand(
+    "vscode.diff",
+    sides.left,
+    sides.right,
+    diffTitle(file.path, sha),
+    {
+      selection: new vscode.Range(line, 0, line, 0),
+    },
+  );
+}
+
+/** Opens files of the commit as one multi-diff editor, in the given order. */
+export async function openMultiDiff(
+  root: vscode.WorkspaceFolder,
+  sha: string,
+  title: string,
+  files: GuideFile[],
+): Promise<void> {
+  const resources: [vscode.Uri, vscode.Uri, vscode.Uri][] = [];
+  for (const file of files) {
+    const sides = await commitDiffSides(root, sha, file.path);
+    if (sides) {
+      resources.push([
+        vscode.Uri.joinPath(root.uri, file.path),
+        sides.left,
+        sides.right,
+      ]);
+    }
+  }
+  await vscode.commands.executeCommand("vscode.changes", title, resources);
+}
+
+/** A read-only guide note; carries what promoting it to a review comment needs. */
+export class GuideNoteComment implements vscode.Comment {
+  readonly author: vscode.CommentAuthorInformation = { name: "Guide" };
+  readonly mode = vscode.CommentMode.Preview;
+  readonly contextValue = "guideNote";
+  readonly body: vscode.MarkdownString;
+
+  constructor(
+    readonly key: string,
+    readonly input: NewCommentInput,
+  ) {
+    this.body = new vscode.MarkdownString(input.text);
+  }
+}
+
+/** Renders the guide's focus notes as read-only comment threads on the commit's version of each file. */
+export class GuideNotes {
+  readonly controller = vscode.comments.createCommentController(
+    "vscode-reviews-guide",
+    "Review guide",
+  );
+  private threads: vscode.CommentThread[] = [];
+  private readonly renderedDocs = new Set<string>();
+
+  constructor(
+    private readonly state: GuideState,
+    private readonly workspaceRoot: string,
+  ) {}
+
+  dispose(): void {
+    this.controller.dispose();
+  }
+
+  rerender(): void {
+    for (const thread of this.threads) {
+      thread.dispose();
+    }
+    this.threads = [];
+    this.renderedDocs.clear();
+    for (const editor of vscode.window.visibleTextEditors) {
+      this.renderDocument(editor.document);
+    }
+  }
+
+  renderDocument(document: vscode.TextDocument): void {
+    const snapshot = this.state.snapshot;
+    const key = document.uri.toString();
+    if (
+      !snapshot ||
+      this.renderedDocs.has(key) ||
+      isDiffOriginalSide(document.uri)
+    ) {
+      return;
+    }
+    if (document.uri.scheme !== "git" && document.uri.scheme !== "gitlens") {
+      return;
+    }
+    const { relPath, shortSha } = parseLocation(key, this.workspaceRoot);
+    if (!shortSha) {
+      return;
+    }
+    this.renderedDocs.add(key);
+    for (const commit of snapshot.guide.commits) {
+      const sha = snapshot.current.get(commit);
+      if (!sha?.startsWith(shortSha)) {
+        continue;
+      }
+      const file = commit.files.find((f) => f.path === relPath);
+      if (!file) {
+        continue;
+      }
+      for (const note of file.notes) {
+        this.renderNote(document.uri, commit, file, note, shortSha);
+      }
+    }
+  }
+
+  private renderNote(
+    uri: vscode.Uri,
+    commit: GuideCommit,
+    file: GuideFile,
+    note: GuideNote,
+    shortSha: string,
+  ): void {
+    const key = noteKey(commit, file, note);
+    if (this.state.isPromoted(key)) {
+      return;
+    }
+    const thread = this.controller.createCommentThread(
+      uri,
+      new vscode.Range(note.startLine - 1, 0, note.endLine - 1, 0),
+      [],
+    );
+    thread.canReply = false;
+    thread.label = "Guide";
+    thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    thread.comments = [
+      new GuideNoteComment(key, {
+        path: file.path,
+        startLine: note.startLine,
+        endLine: note.endLine,
+        shortSha,
+        text: note.text,
+      }),
+    ];
+    this.threads.push(thread);
+  }
+}

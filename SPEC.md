@@ -92,6 +92,56 @@ no tree decoration.
 Caveats: `git push --tags` publishes `rv/` tags; resync only matches when the
 marked commit's own diff is unchanged by the rewrite.
 
+### Review guide
+
+A second sidebar view, **Guide**, walks a branch commit by commit, with each
+commit's files ranked by how closely they deserve reading. An agent (the
+`/prepare-review` skill) writes the guide; the extension only displays it.
+
+**Guide file.** JSON in `<store dir>/guides/`, any filename. The view shows the
+newest (`createdAt`) guide whose `branch` is the checked-out branch, reloading
+when the folder changes, when the view is shown, and on its refresh button.
+
+```json
+{ "branch": "eugene/foo", "base": "<sha>", "createdAt": 1767225600000,
+  "commits": [{ "sha": "<sha>", "patchId": "<patch-id>", "subject": "…",
+    "summary": "…", "flags": ["…"],
+    "files": [{ "path": "src/a.ts", "tier": "critical", "reason": "…",
+      "notes": [{ "startLine": 42, "endLine": 48, "text": "…" }] }] }] }
+```
+
+Commits are oldest first; `files` are in reading order (the first is "start
+here"); tiers are `critical`, `review`, `skim`, `skip`; note lines are
+1-indexed on the commit's version. `flags`, `notes` and a note's `endLine` are
+optional. An invalid file is listed in the view with the offending field.
+
+**Matching.** Each guide commit is located in the branch history (`base..HEAD`,
+or the last 200 commits when `base` left `HEAD`'s history) by sha, else by
+`git patch-id --stable` — the same mechanism as the cursor's resync. A commit
+with neither match is shown as stale.
+
+**Tree.** Commit → tier → file. Tiers carry a colored dot (red, yellow, gray;
+`skip` collapsed). A commit row shows its short sha and checked-file progress;
+its tooltip holds the summary and flags. Clicking a file opens its
+parent..commit diff, on its first note. A commit or tier row opens its files as
+one multi-diff editor (`vscode.changes`) in reading order; a commit's skips
+are left out.
+
+**Checked files.** Files of unreviewed commits have checkboxes, persisted in
+workspace state keyed by patch-id + path so they survive a rebase. Checking a
+commit's last file offers **Mark reviewed**.
+
+**Cursor.** The view reads `rv/<branch>`: commits up to it are reviewed
+(dimmed, check icon, no checkboxes), the cursor commit gets a green bookmark,
+and the view's description counts reviewed commits. Commit rows have a **Mark
+reviewed** action; the view title has Resync. A cursor outside the matched
+history marks nothing reviewed.
+
+**Guide notes.** Notes render as read-only comment threads, author "Guide", on
+the matching commit's version of the file (a separate comment controller with
+no commenting ranges). **Add to Review** on a note copies it into the active
+review as an ordinary comment and hides the note from then on.
+
 ### Prompt format
 
 Copied to the clipboard as plain text, optimized for tokens. One entry per
@@ -123,6 +173,8 @@ vitest:
 - prompt formatting — separator, ranges, `@sha` suffix presence;
 - review cursor — tag name, patch-id output parsing and matching, GitLens
   commit-node shape;
+- review guide — guide parsing and validation errors, tier grouping, sha /
+  patch-id matching, reviewed state against the cursor, checked progress;
 - URI parsing — GitLens/native-diff URI → repo-relative path + short sha;
   the revision-URI round-trip (`buildRevisionUri` ↔ `parseLocation`) is
   unit-tested to pin that both agree on the same URI shape.

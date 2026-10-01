@@ -32,6 +32,10 @@
         {
           "id": "vscode-reviews.tree",
           "name": "Reviews"
+        },
+        {
+          "id": "vscode-reviews.guide",
+          "name": "Guide"
         }
       ]
     },
@@ -125,6 +129,30 @@
         "command": "vscode-reviews.resyncCursor",
         "title": "Reviews: Resync review cursor",
         "icon": "$(sync)"
+      },
+      {
+        "command": "vscode-reviews.guide.refresh",
+        "title": "Reviews: Refresh guide",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vscode-reviews.guide.openFile",
+        "title": "Open Diff"
+      },
+      {
+        "command": "vscode-reviews.guide.openMultiDiff",
+        "title": "Open as Multi-Diff",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "vscode-reviews.guide.markReviewed",
+        "title": "Mark Reviewed",
+        "icon": "$(check)"
+      },
+      {
+        "command": "vscode-reviews.guide.promoteNote",
+        "title": "Add to Review",
+        "icon": "$(comment-unresolved)"
       }
     ],
     "menus": {
@@ -184,6 +212,22 @@
         {
           "command": "vscode-reviews.gitlens.markReviewed",
           "when": "false"
+        },
+        {
+          "command": "vscode-reviews.guide.openFile",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.guide.openMultiDiff",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.guide.markReviewed",
+          "when": "false"
+        },
+        {
+          "command": "vscode-reviews.guide.promoteNote",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -203,6 +247,11 @@
           "command": "vscode-reviews.deleteComment",
           "group": "group@2",
           "when": "commentController == vscode-reviews && comment == canEdit"
+        },
+        {
+          "command": "vscode-reviews.guide.promoteNote",
+          "group": "inline",
+          "when": "commentController == vscode-reviews-guide && comment == guideNote"
         }
       ],
       "comments/comment/context": [
@@ -237,6 +286,16 @@
           "command": "vscode-reviews.resyncCursor",
           "when": "view == vscode-reviews.tree",
           "group": "navigation@4"
+        },
+        {
+          "command": "vscode-reviews.guide.refresh",
+          "when": "view == vscode-reviews.guide",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vscode-reviews.resyncCursor",
+          "when": "view == vscode-reviews.guide",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -299,6 +358,16 @@
           "command": "vscode-reviews.gitlens.markReviewed",
           "when": "viewItem =~ /^gitlens:commit\\b/",
           "group": "9_reviews"
+        },
+        {
+          "command": "vscode-reviews.guide.openMultiDiff",
+          "when": "view == vscode-reviews.guide && viewItem =~ /^guide(Commit|Tier)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "vscode-reviews.guide.markReviewed",
+          "when": "view == vscode-reviews.guide && viewItem == guideCommit",
+          "group": "inline@2"
         }
       ]
     }

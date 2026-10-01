@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { ReviewStore } from "./core/store";
+import { ReviewStore, type NewCommentInput } from "./core/store";
 import type { Review, ReviewComment } from "./core/types";
 import { parseLocation } from "./core/location";
 import { formatPrompt } from "./core/format";
@@ -32,7 +32,7 @@ class ReviewNoteComment implements ReviewCommentHandle {
 }
 
 /** True when this document is the left/old side of an open diff editor tab — out of scope per spec. */
-function isDiffOriginalSide(uri: vscode.Uri): boolean {
+export function isDiffOriginalSide(uri: vscode.Uri): boolean {
   const key = uri.toString();
   for (const group of vscode.window.tabGroups.all) {
     for (const tab of group.tabs) {
@@ -216,8 +216,7 @@ export class ReviewsController {
     this.trackThread(comment.id, thread);
   }
 
-  async createComment(reply: vscode.CommentReply): Promise<void> {
-    const now = Date.now();
+  private async confirmContinue(now: number): Promise<void> {
     if (this.store.needsContinuePrompt(now)) {
       const answer = await promptContinueOrNew();
       this.store.rememberContinueAnswer(answer, now);
@@ -225,6 +224,19 @@ export class ReviewsController {
         this.disposeAllThreads();
       }
     }
+  }
+
+  /** Adds a comment not typed in a thread (e.g. a promoted guide note) and renders it where visible. */
+  async addComment(input: NewCommentInput): Promise<void> {
+    const now = Date.now();
+    await this.confirmContinue(now);
+    this.store.addComment(input, now);
+    this.renderVisibleEditors();
+  }
+
+  async createComment(reply: vscode.CommentReply): Promise<void> {
+    const now = Date.now();
+    await this.confirmContinue(now);
 
     const thread = reply.thread;
     const workspaceRoot = getWorkspaceRoot(thread.uri);

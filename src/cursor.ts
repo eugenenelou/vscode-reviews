@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { findRebasedSha, parsePatchIds, reviewTagName } from "./core/cursor";
+import {
+  findRebasedSha,
+  parsePatchIds,
+  reviewTagName,
+  type PatchIdEntry,
+} from "./core/cursor";
 
 export type MarkResult =
-  | { kind: "detached" }
-  | { kind: "marked"; tag: string; sha: string };
+  { kind: "detached" } | { kind: "marked"; tag: string; sha: string };
 
 export type ResyncResult =
   | { kind: "detached" }
@@ -31,7 +35,7 @@ function succeeds(cwd: string, args: string[]): boolean {
   }
 }
 
-function currentBranch(cwd: string): string | undefined {
+export function currentBranch(cwd: string): string | undefined {
   const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
   return branch === "HEAD" ? undefined : branch;
 }
@@ -82,4 +86,32 @@ export function resyncCursor(cwd: string): ResyncResult {
   }
   git(cwd, ["tag", "-f", tag, to]);
   return { kind: "moved", tag, from, to };
+}
+
+/** The sha the branch's review tag points at, if any. */
+export function cursorSha(cwd: string, branch: string): string | undefined {
+  try {
+    return git(cwd, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/tags/${reviewTagName(branch)}^{commit}`,
+    ]).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Commits since `base` (the last 200 when base left HEAD's history), oldest first, with patch-ids. */
+export function branchHistory(cwd: string, base: string): PatchIdEntry[] {
+  const range = succeeds(cwd, ["merge-base", "--is-ancestor", base, "HEAD"])
+    ? [`${base}..HEAD`]
+    : ["-n", "200", "HEAD"];
+  return parsePatchIds(
+    git(
+      cwd,
+      ["patch-id", "--stable"],
+      git(cwd, ["log", "-p", "--no-merges", "--reverse", ...range]),
+    ),
+  );
 }

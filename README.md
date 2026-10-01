@@ -57,6 +57,27 @@ Detached `HEAD` is refused. Caveats: `git push --tags` publishes `rv/` tags
 too; resync only finds the commit when its own diff is unchanged (a conflict
 resolution or squash into it means re-marking manually).
 
+## Review guide
+
+Run `/prepare-review` in your agent: it reads every commit since your review
+cursor (or since `main`) and writes a guide. The **Guide** view then walks the
+branch commit by commit:
+
+- each commit's files are grouped by tier — 🔴 critical, 🟡 review, ⚪ skim,
+  and a collapsed skip for generated files — in reading order, the first
+  marked **★ start here**;
+- hover a commit for the agent's summary and flags (⚑);
+- click a file for its diff in that commit; the multi-diff button on a commit
+  or tier opens its files in one scrolling diff;
+- the agent's line notes appear in the diff as "Guide" comments; **Add to
+  Review** turns one into a regular review comment;
+- check files as you go; checking a commit's last file offers **Mark
+  reviewed**, which moves the review cursor. Reviewed commits are dimmed, the
+  cursor commit carries a green bookmark.
+
+After a rebase, commits are re-found by patch-id; a commit that changed shows
+as stale until you re-run `/prepare-review`.
+
 ## Settings
 
 - `vscode-reviews.idleTimeoutMinutes` (default `60`) — minutes of inactivity
