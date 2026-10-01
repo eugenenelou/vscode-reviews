@@ -154,19 +154,24 @@ describe("groupFiles", () => {
           ["review", "", ["api"]],
         ],
       ],
-      ["docs", "", ["docs"]],
-      ["", "", ["lock"]],
+      ["docs", "", [["skim", "", ["docs"]]]],
+      ["", "", [["skip", "", ["lock"]]]],
     ]);
   });
 
-  it("leaves out a level with a single group", () => {
+  it("leaves out topics when the commit has a single one", () => {
     const c = commit({ files: [file("a", "review"), file("b", "skim")] });
     expect(shape(groupFiles(c, "topicThenTier"))).toEqual([
       ["review", "", ["a"]],
       ["skim", "", ["b"]],
     ]);
+  });
+
+  it("keeps a single tier", () => {
     const flat = commit({ files: [file("a", "review"), file("b", "review")] });
-    expect(shape(groupFiles(flat, "tierThenTopic"))).toEqual(["a", "b"]);
+    expect(shape(groupFiles(flat, "tierThenTopic"))).toEqual([
+      ["review", "", ["a", "b"]],
+    ]);
   });
 });
 

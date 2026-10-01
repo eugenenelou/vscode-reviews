@@ -35,6 +35,8 @@ import {
   openGuideFile,
   openMultiDiff,
   type GuideNoteComment,
+  guideFileAt,
+  type GuideFileNode,
   type GuideTreeNode,
 } from "./guideView";
 
@@ -226,6 +228,32 @@ export function activate(context: vscode.ExtensionContext) {
     }
   };
 
+  const setFilesChecked = async (
+    changes: { node: GuideFileNode; on: boolean }[],
+  ) => {
+    await guide.setChecked(
+      changes.map(({ node, on }) => ({
+        key: fileKey(node.commit, node.file),
+        on,
+      })),
+    );
+    const checked = guide.checked();
+    const completed = new Map(
+      changes
+        .filter(
+          ({ node, on }) =>
+            on &&
+            node.commit.files.every((f) =>
+              checked.has(fileKey(node.commit, f)),
+            ),
+        )
+        .map(({ node }) => [node.commit, node.sha]),
+    );
+    for (const [commit, sha] of completed) {
+      await offerMarkReviewed(commit, sha);
+    }
+  };
+
   context.subscriptions.push(
     reviews,
     treeView,
@@ -240,34 +268,54 @@ export function activate(context: vscode.ExtensionContext) {
         guide.reload();
       }
     }),
-    guideView.onDidChangeCheckboxState(async (event) => {
-      const changes = event.items.flatMap(([node, checkState]) =>
-        node.kind === "file"
-          ? [{ node, on: checkState === vscode.TreeItemCheckboxState.Checked }]
-          : [],
-      );
-      await guide.setChecked(
-        changes.map(({ node, on }) => ({
-          key: fileKey(node.commit, node.file),
-          on,
-        })),
-      );
-      const checked = guide.checked();
-      const completed = new Map(
-        changes
-          .filter(
-            ({ node, on }) =>
-              on &&
-              node.commit.files.every((f) =>
-                checked.has(fileKey(node.commit, f)),
-              ),
-          )
-          .map(({ node }) => [node.commit, node.sha]),
-      );
-      for (const [commit, sha] of completed) {
-        await offerMarkReviewed(commit, sha);
-      }
-    }),
+    guideView.onDidChangeCheckboxState((event) =>
+      setFilesChecked(
+        event.items.flatMap(([node, checkState]) =>
+          node.kind === "file"
+            ? [
+                {
+                  node,
+                  on: checkState === vscode.TreeItemCheckboxState.Checked,
+                },
+              ]
+            : [],
+        ),
+      ),
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.toggleFileReviewed",
+      async (args?: { source?: "view" | "editor" }) => {
+        const snapshot = guide.snapshot;
+        const editorUri = vscode.window.activeTextEditor?.document.uri;
+        const selected = guideView.selection[0];
+        const node =
+          args?.source === "view"
+            ? selected?.kind === "file"
+              ? selected
+              : undefined
+            : snapshot && editorUri
+              ? guideFileAt(
+                  snapshot,
+                  editorUri,
+                  root?.uri.fsPath ?? fileStore.root,
+                )
+              : undefined;
+        if (!node) {
+          vscode.window.showInformationMessage(
+            "Reviews: no guide file here — select one in the Guide view or open its diff.",
+          );
+          return;
+        }
+        if (guide.reviewState(node.sha) !== "unreviewed") {
+          vscode.window.showInformationMessage(
+            `Reviews: "${node.commit.subject}" is already reviewed.`,
+          );
+          return;
+        }
+        const on = !guide.checked().has(fileKey(node.commit, node.file));
+        await setFilesChecked([{ node, on }]);
+      },
+    ),
     vscode.window.registerFileDecorationProvider(guideDecorations),
     vscode.commands.registerCommand("vscode-reviews.guide.refresh", () =>
       guide.reload(),
@@ -278,6 +326,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("vscode-reviews.guide.groupByTier", () =>
       updateSetting("guideGrouping", "tierThenTopic" satisfies Grouping),
     ),
+    vscode.commands.registerCommand("vscode-reviews.guide.reasonInline", () =>
+      updateSetting("guideFileReason", "inline"),
+    ),
+    vscode.commands.registerCommand(
+      "vscode-reviews.guide.reasonSecondLine",
+      () => updateSetting("guideFileReason", "secondLine"),
+    ),
     vscode.commands.registerCommand("vscode-reviews.guide.showNotes", () =>
       updateSetting("guideNotesInline", true),
     ),
@@ -285,7 +340,10 @@ export function activate(context: vscode.ExtensionContext) {
       updateSetting("guideNotesInline", false),
     ),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("vscode-reviews.guideGrouping")) {
+      if (
+        event.affectsConfiguration("vscode-reviews.guideGrouping") ||
+        event.affectsConfiguration("vscode-reviews.guideFileReason")
+      ) {
         guideTree.refresh();
       }
       if (event.affectsConfiguration("vscode-reviews.guideNotesInline")) {

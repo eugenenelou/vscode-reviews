@@ -125,18 +125,22 @@ with neither match is shown as stale.
 
 **Tree.** Commits newest first. Under a commit, files nest by tier then topic,
 or topic then tier (`vscode-reviews.guideGrouping`, toggled from the view
-title); a level with a single group is left out, and files without a topic
+title); topics are left out when the commit has a single one, and files without a topic
 group under "Other", last. Tiers carry a colored dot (red, yellow, gray; a
 group of skips starts collapsed). A group row shows its hint, or its file count
 without one. A commit row shows its short sha and checked-file progress;
 its tooltip holds the summary and flags. Clicking a file opens its
-parent..commit diff, on its first note. A commit or group row opens its files
+parent..commit diff, on its first note. A file's reason shows on a row under
+it, or after its path (`vscode-reviews.guideFileReason`, toggled from the view
+title). A commit or group row opens its files
 as one multi-diff editor (`vscode.changes`) in display order; a commit's skips
 are left out.
 
 **Checked files.** Files of unreviewed commits have checkboxes, persisted in
 workspace state keyed by patch-id + path so they survive a rebase. Checking a
-commit's last file offers **Mark reviewed**.
+commit's last file offers **Mark reviewed**. **Toggle File Reviewed**
+(`ctrl+alt+r`) flips the check of the file selected in the Guide view, or of
+the guide file shown in the focused editor.
 
 **Cursor.** The view reads `rv/<branch>`: commits up to it are reviewed
 (dimmed, check icon, no checkboxes), the cursor commit gets a green bookmark,

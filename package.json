@@ -58,12 +58,25 @@
             "Group each commit's files by tier, then by topic.",
             "Group each commit's files by topic, then by tier."
           ],
-          "description": "How the Guide view nests a commit's files. A level with a single group is left out."
+          "description": "How the Guide view nests a commit's files. Topics are left out when a commit has a single one."
         },
         "vscode-reviews.guideNotesInline": {
           "type": "boolean",
           "default": true,
           "description": "Show the Guide's line notes as comment threads in diffs."
+        },
+        "vscode-reviews.guideFileReason": {
+          "type": "string",
+          "enum": [
+            "secondLine",
+            "inline"
+          ],
+          "default": "secondLine",
+          "enumDescriptions": [
+            "Show a file's reason on its own row under the file.",
+            "Show a file's reason after its path, on the same row."
+          ],
+          "description": "Where the Guide view shows each file's reason."
         }
       }
     },
@@ -191,6 +204,20 @@
         "command": "vscode-reviews.guide.showNotes",
         "title": "Reviews: Show Guide Notes in Diffs",
         "icon": "$(eye-closed)"
+      },
+      {
+        "command": "vscode-reviews.guide.toggleFileReviewed",
+        "title": "Reviews: Toggle File Reviewed"
+      },
+      {
+        "command": "vscode-reviews.guide.reasonInline",
+        "title": "Reviews: Show File Reasons Inline",
+        "icon": "$(fold)"
+      },
+      {
+        "command": "vscode-reviews.guide.reasonSecondLine",
+        "title": "Reviews: Show File Reasons on a Second Line",
+        "icon": "$(unfold)"
       }
     ],
     "menus": {
@@ -354,6 +381,16 @@
           "command": "vscode-reviews.guide.showNotes",
           "when": "view == vscode-reviews.guide && !config.vscode-reviews.guideNotesInline",
           "group": "navigation@0"
+        },
+        {
+          "command": "vscode-reviews.guide.reasonInline",
+          "when": "view == vscode-reviews.guide && config.vscode-reviews.guideFileReason != inline",
+          "group": "navigation@0"
+        },
+        {
+          "command": "vscode-reviews.guide.reasonSecondLine",
+          "when": "view == vscode-reviews.guide && config.vscode-reviews.guideFileReason == inline",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
@@ -428,7 +465,27 @@
           "group": "inline@2"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "vscode-reviews.guide.toggleFileReviewed",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "focusedView == vscode-reviews.guide",
+        "args": {
+          "source": "view"
+        }
+      },
+      {
+        "command": "vscode-reviews.guide.toggleFileReviewed",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorFocus",
+        "args": {
+          "source": "editor"
+        }
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

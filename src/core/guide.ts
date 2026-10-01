@@ -218,7 +218,7 @@ function entries(
     return files.map((file) => ({ kind: "file", file }));
   }
   const keys = orderedKeys(files, dimension);
-  if (keys.length <= 1) {
+  if (dimension === "topic" && keys.length <= 1) {
     return entries(commit, files, rest);
   }
   return keys.map((key) => {
@@ -238,7 +238,7 @@ function entries(
 
 /**
  * The commit's files as nested groups, files in reading order within each.
- * A level with a single group is left out, its files shown directly.
+ * Topics are left out when the commit has a single one; tiers always show.
  */
 export function groupFiles(
   commit: GuideCommit,

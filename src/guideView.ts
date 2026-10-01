@@ -162,6 +162,34 @@ export class GuideState {
   }
 }
 
+/** The guide file a document shows: that file at a guide commit's revision, never a diff's original side. */
+export function guideFileAt(
+  snapshot: GuideSnapshot,
+  uri: vscode.Uri,
+  workspaceRoot: string,
+): GuideFileNode | undefined {
+  if (
+    (uri.scheme !== "git" && uri.scheme !== "gitlens") ||
+    isDiffOriginalSide(uri)
+  ) {
+    return undefined;
+  }
+  const { relPath, shortSha } = parseLocation(uri.toString(), workspaceRoot);
+  if (!shortSha) {
+    return undefined;
+  }
+  for (const commit of snapshot.guide.commits) {
+    const sha = snapshot.current.get(commit);
+    const file = commit.files.find((f) => f.path === relPath);
+    if (sha?.startsWith(shortSha) && file) {
+      return { kind: "file", commit, sha, file };
+    }
+  }
+  return undefined;
+}
+
+export type GuideFileNode = Extract<GuideTreeNode, { kind: "file" }>;
+
 export type GuideTreeNode =
   | { kind: "message"; text: string; detail?: string }
   | { kind: "commit"; commit: GuideCommit; sha: string | undefined }
@@ -171,7 +199,8 @@ export type GuideTreeNode =
       sha: string;
       group: Extract<GuideEntry, { kind: "group" }>;
     }
-  | { kind: "file"; commit: GuideCommit; sha: string; file: GuideFile };
+  | { kind: "file"; commit: GuideCommit; sha: string; file: GuideFile }
+  | { kind: "reason"; text: string };
 
 const TIER_STYLE: Record<Tier, { label: string; icon: string; color: string }> =
   {
@@ -191,6 +220,16 @@ export function guideNotesInline(): boolean {
   return vscode.workspace
     .getConfiguration("vscode-reviews")
     .get<boolean>("guideNotesInline", true);
+}
+
+/** Whether the file's reason shows as a row under it rather than after its path. */
+function reasonOnSecondLine(file: GuideFile): boolean {
+  return (
+    file.reason !== "" &&
+    vscode.workspace
+      .getConfiguration("vscode-reviews")
+      .get<string>("guideFileReason", "secondLine") === "secondLine"
+  );
 }
 
 function groupItem(
@@ -326,6 +365,9 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
         element.group.children,
       );
     }
+    if (element.kind === "file" && reasonOnSecondLine(element.file)) {
+      return [{ kind: "reason", text: element.file.reason }];
+    }
     return [];
   }
 
@@ -352,6 +394,12 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
         return groupItem(element.group);
       case "file":
         return this.fileItem(element.commit, element.sha, element.file);
+      case "reason": {
+        const item = new vscode.TreeItem("");
+        item.description = element.text;
+        item.tooltip = element.text;
+        return item;
+      }
     }
   }
 
@@ -413,11 +461,20 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
     const item = new vscode.TreeItem(file.path);
     item.resourceUri = vscode.Uri.joinPath(this.rootUri, file.path);
     item.iconPath = vscode.ThemeIcon.File;
-    const startHere = commit.files[0] === file ? "★ start here · " : "";
     const notes = file.notes.length
-      ? ` · ${file.notes.length} note${file.notes.length === 1 ? "" : "s"}`
+      ? `${file.notes.length} note${file.notes.length === 1 ? "" : "s"}`
       : "";
-    item.description = `${startHere}${file.reason}${notes}`;
+    const secondLine = reasonOnSecondLine(file);
+    item.description = [
+      commit.files[0] === file ? "★ start here" : "",
+      secondLine ? "" : file.reason,
+      notes,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (secondLine) {
+      item.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+    }
     item.tooltip = file.reason;
     item.contextValue = "guideFile";
     if (this.state.reviewState(sha) === "unreviewed") {
@@ -530,33 +587,22 @@ export class GuideNotes {
     }
     const snapshot = this.state.snapshot;
     const key = document.uri.toString();
-    if (
-      !snapshot ||
-      this.renderedDocs.has(key) ||
-      isDiffOriginalSide(document.uri)
-    ) {
+    if (!snapshot || this.renderedDocs.has(key)) {
       return;
     }
-    if (document.uri.scheme !== "git" && document.uri.scheme !== "gitlens") {
-      return;
-    }
-    const { relPath, shortSha } = parseLocation(key, this.workspaceRoot);
-    if (!shortSha) {
+    const found = guideFileAt(snapshot, document.uri, this.workspaceRoot);
+    if (!found) {
       return;
     }
     this.renderedDocs.add(key);
-    for (const commit of snapshot.guide.commits) {
-      const sha = snapshot.current.get(commit);
-      if (!sha?.startsWith(shortSha)) {
-        continue;
-      }
-      const file = commit.files.find((f) => f.path === relPath);
-      if (!file) {
-        continue;
-      }
-      for (const note of file.notes) {
-        this.renderNote(document.uri, commit, file, note, shortSha);
-      }
+    for (const note of found.file.notes) {
+      this.renderNote(
+        document.uri,
+        found.commit,
+        found.file,
+        note,
+        found.sha.slice(0, 7),
+      );
     }
   }
 
