@@ -20,7 +20,13 @@ import {
 } from "./persistence";
 import { ReviewsController, type ReviewCommentHandle } from "./reviews";
 import { ReviewsTreeProvider, type ReviewsTreeNode } from "./tree";
-import { groupByTier, fileKey, type GuideCommit } from "./core/guide";
+import {
+  entryFiles,
+  fileKey,
+  filesToRead,
+  type GuideCommit,
+  type Grouping,
+} from "./core/guide";
 import {
   GuideNotes,
   GuideState,
@@ -31,6 +37,12 @@ import {
   type GuideNoteComment,
   type GuideTreeNode,
 } from "./guideView";
+
+async function updateSetting(key: string, value: unknown): Promise<void> {
+  await vscode.workspace
+    .getConfiguration("vscode-reviews")
+    .update(key, value, vscode.ConfigurationTarget.Global);
+}
 
 /**
  * Default click on a comment: opens the working-tree file when there's no
@@ -171,11 +183,12 @@ export function activate(context: vscode.ExtensionContext) {
     context.workspaceState,
   );
   const guideNotes = new GuideNotes(guide, root?.uri.fsPath ?? fileStore.root);
+  const guideTree = new GuideTreeProvider(
+    guide,
+    root?.uri ?? vscode.Uri.file(fileStore.root),
+  );
   const guideView = vscode.window.createTreeView("vscode-reviews.guide", {
-    treeDataProvider: new GuideTreeProvider(
-      guide,
-      root?.uri ?? vscode.Uri.file(fileStore.root),
-    ),
+    treeDataProvider: guideTree,
     manageCheckboxStateManually: true,
   });
   const guideWatcher = vscode.workspace.createFileSystemWatcher(
@@ -259,6 +272,26 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("vscode-reviews.guide.refresh", () =>
       guide.reload(),
     ),
+    vscode.commands.registerCommand("vscode-reviews.guide.groupByTopic", () =>
+      updateSetting("guideGrouping", "topicThenTier" satisfies Grouping),
+    ),
+    vscode.commands.registerCommand("vscode-reviews.guide.groupByTier", () =>
+      updateSetting("guideGrouping", "tierThenTopic" satisfies Grouping),
+    ),
+    vscode.commands.registerCommand("vscode-reviews.guide.showNotes", () =>
+      updateSetting("guideNotesInline", true),
+    ),
+    vscode.commands.registerCommand("vscode-reviews.guide.hideNotes", () =>
+      updateSetting("guideNotesInline", false),
+    ),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("vscode-reviews.guideGrouping")) {
+        guideTree.refresh();
+      }
+      if (event.affectsConfiguration("vscode-reviews.guideNotesInline")) {
+        guideNotes.rerender();
+      }
+    }),
     vscode.commands.registerCommand(
       "vscode-reviews.guide.openFile",
       async (node: GuideTreeNode) => {
@@ -273,18 +306,20 @@ export function activate(context: vscode.ExtensionContext) {
         if (!root) {
           return;
         }
-        if (node.kind === "tier") {
+        if (node.kind === "group") {
           await openMultiDiff(
             root,
             node.sha,
-            `${node.commit.subject} — ${node.tier}`,
-            node.files,
+            `${node.commit.subject} — ${node.group.key || "Other"}`,
+            entryFiles(node.group.children),
           );
         } else if (node.kind === "commit" && node.sha) {
-          const files = groupByTier(node.commit)
-            .filter((group) => group.tier !== "skip")
-            .flatMap((group) => group.files);
-          await openMultiDiff(root, node.sha, node.commit.subject, files);
+          await openMultiDiff(
+            root,
+            node.sha,
+            node.commit.subject,
+            filesToRead(node.commit),
+          );
         }
       },
     ),

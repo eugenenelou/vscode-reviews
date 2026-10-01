@@ -5,12 +5,14 @@ import {
   commitProgress,
   commitReviewState,
   fileKey,
-  groupByTier,
+  groupFiles,
   latestGuideFor,
   matchGuideCommits,
   noteKey,
   parseGuide,
   type CommitReviewState,
+  type GuideEntry,
+  type Grouping,
   type Guide,
   type GuideCommit,
   type GuideFile,
@@ -164,11 +166,10 @@ export type GuideTreeNode =
   | { kind: "message"; text: string; detail?: string }
   | { kind: "commit"; commit: GuideCommit; sha: string | undefined }
   | {
-      kind: "tier";
+      kind: "group";
       commit: GuideCommit;
       sha: string;
-      tier: Tier;
-      files: GuideFile[];
+      group: Extract<GuideEntry, { kind: "group" }>;
     }
   | { kind: "file"; commit: GuideCommit; sha: string; file: GuideFile };
 
@@ -179,6 +180,47 @@ const TIER_STYLE: Record<Tier, { label: string; icon: string; color: string }> =
     skim: { label: "Skim", icon: "circle-filled", color: "disabledForeground" },
     skip: { label: "Skip", icon: "circle-slash", color: "disabledForeground" },
   };
+
+export function guideGrouping(): Grouping {
+  return vscode.workspace
+    .getConfiguration("vscode-reviews")
+    .get<Grouping>("guideGrouping", "tierThenTopic");
+}
+
+export function guideNotesInline(): boolean {
+  return vscode.workspace
+    .getConfiguration("vscode-reviews")
+    .get<boolean>("guideNotesInline", true);
+}
+
+function groupItem(
+  group: Extract<GuideEntry, { kind: "group" }>,
+): vscode.TreeItem {
+  const allSkipped = group.files.every((f) => f.tier === "skip");
+  const item = new vscode.TreeItem(
+    group.dimension === "tier"
+      ? TIER_STYLE[group.key as Tier].label
+      : group.key || "Other",
+    allSkipped
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.Expanded,
+  );
+  const count = group.files.length;
+  const files = `${count} file${count === 1 ? "" : "s"}`;
+  item.description = group.description || files;
+  item.tooltip = group.description ? `${group.description} · ${files}` : files;
+  if (group.dimension === "tier") {
+    const style = TIER_STYLE[group.key as Tier];
+    item.iconPath = new vscode.ThemeIcon(
+      style.icon,
+      new vscode.ThemeColor(style.color),
+    );
+  } else {
+    item.iconPath = new vscode.ThemeIcon("tag");
+  }
+  item.contextValue = "guideGroup";
+  return item;
+}
 
 function commitDecorationUri(
   sha: string,
@@ -225,7 +267,23 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
     private readonly state: GuideState,
     private readonly rootUri: vscode.Uri,
   ) {
-    state.onDidChange(() => this.emitter.fire(undefined));
+    state.onDidChange(() => this.refresh());
+  }
+
+  refresh(): void {
+    this.emitter.fire(undefined);
+  }
+
+  private entryNodes(
+    commit: GuideCommit,
+    sha: string,
+    entries: GuideEntry[],
+  ): GuideTreeNode[] {
+    return entries.map((entry) =>
+      entry.kind === "group"
+        ? { kind: "group", commit, sha, group: entry }
+        : { kind: "file", commit, sha, file: entry.file },
+    );
   }
 
   getChildren(element?: GuideTreeNode): GuideTreeNode[] {
@@ -236,7 +294,7 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
       }
       const { snapshot, invalid } = load;
       return [
-        ...snapshot.guide.commits.map(
+        ...[...snapshot.guide.commits].reverse().map(
           (commit) =>
             ({
               kind: "commit",
@@ -255,22 +313,18 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
       ];
     }
     if (element.kind === "commit" && element.sha) {
-      const sha = element.sha;
-      return groupByTier(element.commit).map((group) => ({
-        kind: "tier",
-        commit: element.commit,
-        sha,
-        tier: group.tier,
-        files: group.files,
-      }));
+      return this.entryNodes(
+        element.commit,
+        element.sha,
+        groupFiles(element.commit, guideGrouping()),
+      );
     }
-    if (element.kind === "tier") {
-      return element.files.map((file) => ({
-        kind: "file",
-        commit: element.commit,
-        sha: element.sha,
-        file,
-      }));
+    if (element.kind === "group") {
+      return this.entryNodes(
+        element.commit,
+        element.sha,
+        element.group.children,
+      );
     }
     return [];
   }
@@ -294,23 +348,8 @@ export class GuideTreeProvider implements vscode.TreeDataProvider<GuideTreeNode>
       }
       case "commit":
         return this.commitItem(element.commit, element.sha);
-      case "tier": {
-        const style = TIER_STYLE[element.tier];
-        const item = new vscode.TreeItem(
-          style.label,
-          element.tier === "skip"
-            ? vscode.TreeItemCollapsibleState.Collapsed
-            : vscode.TreeItemCollapsibleState.Expanded,
-        );
-        const count = element.files.length;
-        item.description = `${count} file${count === 1 ? "" : "s"}`;
-        item.iconPath = new vscode.ThemeIcon(
-          style.icon,
-          new vscode.ThemeColor(style.color),
-        );
-        item.contextValue = "guideTier";
-        return item;
-      }
+      case "group":
+        return groupItem(element.group);
       case "file":
         return this.fileItem(element.commit, element.sha, element.file);
     }
@@ -486,6 +525,9 @@ export class GuideNotes {
   }
 
   renderDocument(document: vscode.TextDocument): void {
+    if (!guideNotesInline()) {
+      return;
+    }
     const snapshot = this.state.snapshot;
     const key = document.uri.toString();
     if (

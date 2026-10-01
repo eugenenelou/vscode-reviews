@@ -14,6 +14,8 @@ export interface GuideFile {
   path: string;
   tier: Tier;
   reason: string;
+  /** Groups files by concern when a commit touches several; absent means "Other". */
+  topic?: string;
   notes: GuideNote[];
 }
 
@@ -25,6 +27,9 @@ export interface GuideCommit {
   flags: string[];
   /** In reading order: the first file is where to start. */
   files: GuideFile[];
+  /** Optional short review hint per group, keyed by topic name or tier. */
+  topics: Record<string, string>;
+  tiers: Partial<Record<Tier, string>>;
 }
 
 /** Written by the /prepare-review skill; commits oldest first. */
@@ -38,10 +43,22 @@ export interface Guide {
 
 export type CommitReviewState = "reviewed" | "cursor" | "unreviewed";
 
-export interface TierGroup {
-  tier: Tier;
-  files: GuideFile[];
-}
+export type GroupDimension = "tier" | "topic";
+
+/** Nesting order of the file groups under a commit. */
+export type Grouping = "tierThenTopic" | "topicThenTier";
+
+export type GuideEntry =
+  | {
+      kind: "group";
+      dimension: GroupDimension;
+      /** A tier, a topic name, or "" for files without a topic. */
+      key: string;
+      description: string;
+      files: GuideFile[];
+      children: GuideEntry[];
+    }
+  | { kind: "file"; file: GuideFile };
 
 function fail(where: string, message: string): never {
   throw new Error(`${where}: ${message}`);
@@ -75,6 +92,21 @@ function obj(value: unknown, where: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function descriptions(
+  value: unknown,
+  where: string,
+  allowedKeys?: readonly string[],
+): Record<string, string> {
+  const map = obj(value ?? {}, where);
+  for (const [key, text] of Object.entries(map)) {
+    if (allowedKeys && !allowedKeys.includes(key)) {
+      fail(`${where}.${key}`, `expected one of ${allowedKeys.join(", ")}`);
+    }
+    str(text, `${where}.${key}`);
+  }
+  return map as Record<string, string>;
+}
+
 function parseNote(value: unknown, where: string): GuideNote {
   const note = obj(value, where);
   const startLine = line(note.startLine, `${where}.startLine`);
@@ -98,6 +130,9 @@ function parseFile(value: unknown, where: string): GuideFile {
     path: str(file.path, `${where}.path`),
     tier: tier as Tier,
     reason: str(file.reason, `${where}.reason`),
+    ...(file.topic === undefined
+      ? {}
+      : { topic: str(file.topic, `${where}.topic`) }),
     notes: arr(file.notes ?? [], `${where}.notes`).map((n, i) =>
       parseNote(n, `${where}.notes[${i}]`),
     ),
@@ -117,6 +152,8 @@ function parseCommit(value: unknown, where: string): GuideCommit {
     files: arr(commit.files, `${where}.files`).map((f, i) =>
       parseFile(f, `${where}.files[${i}]`),
     ),
+    topics: descriptions(commit.topics, `${where}.topics`),
+    tiers: descriptions(commit.tiers, `${where}.tiers`, TIERS),
   };
 }
 
@@ -150,12 +187,78 @@ export function latestGuideFor(
     );
 }
 
-/** Non-empty tiers in tier order; files keep their reading order. */
-export function groupByTier(commit: GuideCommit): TierGroup[] {
-  return TIERS.map((tier) => ({
-    tier,
-    files: commit.files.filter((f) => f.tier === tier),
-  })).filter((group) => group.files.length > 0);
+const DIMENSIONS: Record<Grouping, GroupDimension[]> = {
+  tierThenTopic: ["tier", "topic"],
+  topicThenTier: ["topic", "tier"],
+};
+
+function groupKey(file: GuideFile, dimension: GroupDimension): string {
+  return dimension === "tier" ? file.tier : (file.topic ?? "");
+}
+
+/** Tiers in importance order; topics in reading order, files without one last. */
+function orderedKeys(files: GuideFile[], dimension: GroupDimension): string[] {
+  const present = [...new Set(files.map((f) => groupKey(f, dimension)))];
+  if (dimension === "tier") {
+    return TIERS.filter((tier) => present.includes(tier));
+  }
+  return [
+    ...present.filter((k) => k !== ""),
+    ...present.filter((k) => k === ""),
+  ];
+}
+
+function entries(
+  commit: GuideCommit,
+  files: GuideFile[],
+  dimensions: GroupDimension[],
+): GuideEntry[] {
+  const [dimension, ...rest] = dimensions;
+  if (!dimension) {
+    return files.map((file) => ({ kind: "file", file }));
+  }
+  const keys = orderedKeys(files, dimension);
+  if (keys.length <= 1) {
+    return entries(commit, files, rest);
+  }
+  return keys.map((key) => {
+    const groupFiles = files.filter((f) => groupKey(f, dimension) === key);
+    const descriptions: Record<string, string | undefined> =
+      dimension === "tier" ? commit.tiers : commit.topics;
+    return {
+      kind: "group",
+      dimension,
+      key,
+      description: descriptions[key] ?? "",
+      files: groupFiles,
+      children: entries(commit, groupFiles, rest),
+    };
+  });
+}
+
+/**
+ * The commit's files as nested groups, files in reading order within each.
+ * A level with a single group is left out, its files shown directly.
+ */
+export function groupFiles(
+  commit: GuideCommit,
+  grouping: Grouping,
+): GuideEntry[] {
+  return entries(commit, commit.files, DIMENSIONS[grouping]);
+}
+
+/** The files under entries, in display order. */
+export function entryFiles(entries: GuideEntry[]): GuideFile[] {
+  return entries.flatMap((e) =>
+    e.kind === "file" ? [e.file] : entryFiles(e.children),
+  );
+}
+
+/** Every non-skip file, most critical tier first, reading order within a tier. */
+export function filesToRead(commit: GuideCommit): GuideFile[] {
+  return TIERS.filter((tier) => tier !== "skip").flatMap((tier) =>
+    commit.files.filter((f) => f.tier === tier),
+  );
 }
 
 /**

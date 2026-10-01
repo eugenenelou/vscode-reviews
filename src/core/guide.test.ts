@@ -3,11 +3,16 @@ import {
   commitProgress,
   commitReviewState,
   fileKey,
-  groupByTier,
+  entryFiles,
+  filesToRead,
+  groupFiles,
   latestGuideFor,
   matchGuideCommits,
   parseGuide,
   type GuideCommit,
+  type GuideEntry,
+  type GuideFile,
+  type Tier,
 } from "./guide";
 
 const SHA_A = "a".repeat(40);
@@ -48,6 +53,8 @@ function commit(overrides: Partial<GuideCommit> = {}): GuideCommit {
     summary: "",
     flags: [],
     files: [],
+    topics: {},
+    tiers: {},
     ...overrides,
   };
 }
@@ -71,6 +78,23 @@ describe("parseGuide", () => {
     );
   });
 
+  it("parses topics and group descriptions, rejecting an unknown tier key", () => {
+    const raw = rawGuide();
+    const c = raw.commits[0] as Record<string, unknown>;
+    c.topics = { auth: "check the refresh path" };
+    c.tiers = { skim: "" };
+    (c.files as Record<string, unknown>[])[0]!.topic = "auth";
+    const parsed = parseGuide("g1", raw).commits[0]!;
+    expect(parsed.topics).toEqual({ auth: "check the refresh path" });
+    expect(parsed.tiers).toEqual({ skim: "" });
+    expect(parsed.files[0]?.topic).toBe("auth");
+    expect(parsed.files[1]?.topic).toBeUndefined();
+    c.tiers = { urgent: "x" };
+    expect(() => parseGuide("g1", raw)).toThrow(
+      "guide.commits[0].tiers.urgent",
+    );
+  });
+
   it("rejects a note range ending before it starts", () => {
     const bad = rawGuide();
     (bad.commits[0]!.files[1] as { notes: unknown[] }).notes = [
@@ -90,22 +114,88 @@ describe("latestGuideFor", () => {
   });
 });
 
-describe("groupByTier", () => {
-  it("orders tiers by importance, drops empty ones, keeps reading order", () => {
-    const files = [
-      { path: "1", tier: "skim", reason: "", notes: [] },
-      { path: "2", tier: "critical", reason: "", notes: [] },
-      { path: "3", tier: "skim", reason: "", notes: [] },
-    ] as const;
-    expect(
-      groupByTier(commit({ files: [...files] })).map((g) => [
-        g.tier,
-        g.files.map((f) => f.path),
-      ]),
-    ).toEqual([
-      ["critical", ["2"]],
-      ["skim", ["1", "3"]],
+function file(path: string, tier: Tier, topic?: string): GuideFile {
+  return { path, tier, reason: "", notes: [], ...(topic ? { topic } : {}) };
+}
+
+/** Compact shape: a group as `[key, description, children]`, a file as its path. */
+function shape(entries: GuideEntry[]): unknown[] {
+  return entries.map((e) =>
+    e.kind === "file" ? e.file.path : [e.key, e.description, shape(e.children)],
+  );
+}
+
+describe("groupFiles", () => {
+  const files = [
+    file("api", "review", "auth"),
+    file("model", "critical", "auth"),
+    file("lock", "skip"),
+    file("docs", "skim", "docs"),
+  ];
+
+  it("nests tiers then topics, tiers by importance, topics in reading order with untopiced last", () => {
+    const c = commit({ files, tiers: { critical: "check the invariant" } });
+    expect(shape(groupFiles(c, "tierThenTopic"))).toEqual([
+      ["critical", "check the invariant", ["model"]],
+      ["review", "", ["api"]],
+      ["skim", "", ["docs"]],
+      ["skip", "", ["lock"]],
     ]);
+  });
+
+  it("nests topics then tiers, with topic descriptions", () => {
+    const c = commit({ files, topics: { auth: "token refresh" } });
+    expect(shape(groupFiles(c, "topicThenTier"))).toEqual([
+      [
+        "auth",
+        "token refresh",
+        [
+          ["critical", "", ["model"]],
+          ["review", "", ["api"]],
+        ],
+      ],
+      ["docs", "", ["docs"]],
+      ["", "", ["lock"]],
+    ]);
+  });
+
+  it("leaves out a level with a single group", () => {
+    const c = commit({ files: [file("a", "review"), file("b", "skim")] });
+    expect(shape(groupFiles(c, "topicThenTier"))).toEqual([
+      ["review", "", ["a"]],
+      ["skim", "", ["b"]],
+    ]);
+    const flat = commit({ files: [file("a", "review"), file("b", "review")] });
+    expect(shape(groupFiles(flat, "tierThenTopic"))).toEqual(["a", "b"]);
+  });
+});
+
+describe("entryFiles", () => {
+  it("flattens groups in display order", () => {
+    const c = commit({
+      files: [
+        file("api", "review", "auth"),
+        file("docs", "skim", "docs"),
+        file("model", "critical", "auth"),
+      ],
+    });
+    expect(
+      entryFiles(groupFiles(c, "topicThenTier")).map((f) => f.path),
+    ).toEqual(["model", "api", "docs"]);
+  });
+});
+
+describe("filesToRead", () => {
+  it("lists non-skip files by tier, reading order within a tier", () => {
+    const c = commit({
+      files: [
+        file("1", "skim"),
+        file("2", "critical"),
+        file("3", "skip"),
+        file("4", "critical"),
+      ],
+    });
+    expect(filesToRead(c).map((f) => f.path)).toEqual(["2", "4", "1"]);
   });
 });
 

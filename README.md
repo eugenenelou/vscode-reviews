@@ -63,14 +63,18 @@ Run `/prepare-review` in your agent: it reads every commit since your review
 cursor (or since `main`) and writes a guide. The **Guide** view then walks the
 branch commit by commit:
 
-- each commit's files are grouped by tier — 🔴 critical, 🟡 review, ⚪ skim,
-  and a collapsed skip for generated files — in reading order, the first
-  marked **★ start here**;
+- commits are listed newest first; each commit's files are grouped by tier —
+  🔴 critical, 🟡 review, ⚪ skim, and a collapsed skip for generated files —
+  and by topic when the commit touches several concerns, in reading order, the
+  first marked **★ start here**. The view title button switches between
+  tier → topic and topic → tier; a level with one group is left out. Groups
+  show a short hint from the agent on what to look for;
 - hover a commit for the agent's summary and flags (⚑);
 - click a file for its diff in that commit; the multi-diff button on a commit
   or tier opens its files in one scrolling diff;
 - the agent's line notes appear in the diff as "Guide" comments; **Add to
-  Review** turns one into a regular review comment;
+  Review** turns one into a regular review comment; the eye button in the
+  view title hides or shows them;
 - check files as you go; checking a commit's last file offers **Mark
   reviewed**, which moves the review cursor. Reviewed commits are dimmed, the
   cursor commit carries a green bookmark.
@@ -80,6 +84,10 @@ as stale until you re-run `/prepare-review`.
 
 ## Settings
 
+- `vscode-reviews.guideGrouping` (default `tierThenTopic`) — how the Guide
+  view nests a commit's files: `tierThenTopic` or `topicThenTier`.
+- `vscode-reviews.guideNotesInline` (default `true`) — show the Guide's line
+  notes as comment threads in diffs.
 - `vscode-reviews.idleTimeoutMinutes` (default `60`) — minutes of inactivity
   before a new comment triggers the continue/new-review prompt.
 
