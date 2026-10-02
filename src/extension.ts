@@ -16,6 +16,7 @@ import {
   applyChange,
   getIdleTimeoutMs,
   initFileStore,
+  installGuideValidator,
   loadReviews,
 } from "./persistence";
 import { ReviewsController, type ReviewCommentHandle } from "./reviews";
@@ -160,6 +161,7 @@ function resyncReviewCursor(): void {
 
 export function activate(context: vscode.ExtensionContext) {
   const fileStore = initFileStore();
+  installGuideValidator(context.extensionPath);
   let treeProvider: ReviewsTreeProvider | undefined;
   const store = new ReviewStore({
     timeoutMs: getIdleTimeoutMs(),

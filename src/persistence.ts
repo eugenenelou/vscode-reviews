@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -91,16 +92,12 @@ function slugFor(root: string): string {
   return `${basename(root)}-${hash}`;
 }
 
+const STORE_BASE = join(homedir(), ".local", "share", "vscode-reviews");
+
 /** Resolves the per-worktree store directory and writes meta.json, creating the directory if needed. */
 export function initFileStore(): FileStore {
   const root = resolveWorkspaceRoot();
-  const dir = join(
-    homedir(),
-    ".local",
-    "share",
-    "vscode-reviews",
-    slugFor(root),
-  );
+  const dir = join(STORE_BASE, slugFor(root));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "meta.json"), JSON.stringify({ root }, null, 2));
   return { dir, root };
@@ -160,4 +157,21 @@ export function getIdleTimeoutMs(): number {
     .getConfiguration("vscode-reviews")
     .get<number>("idleTimeoutMinutes", 60);
   return minutes * 60 * 1000;
+}
+
+/**
+ * Writes `bin/validate-guide` under the store base, a version-independent
+ * entry point for the guide-writing skill. Runs through VS Code's own runtime
+ * so it doesn't need Node on PATH.
+ */
+export function installGuideValidator(extensionPath: string): void {
+  const bin = join(STORE_BASE, "bin");
+  mkdirSync(bin, { recursive: true });
+  const script = join(bin, "validate-guide");
+  const entry = join(extensionPath, "dist", "cli", "validateGuide.js");
+  writeFileSync(
+    script,
+    `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${process.execPath}" "${entry}" "$@"\n`,
+  );
+  chmodSync(script, 0o755);
 }
